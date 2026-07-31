@@ -107,8 +107,8 @@ namespace LaunchRamp.Vehicle
             StringBuilder report, List<string> issues)
         {
             Collider[] vehicle = root.GetComponentsInChildren<Collider>(true);
-            Collider[] scene = Object.FindObjectsByType<Collider>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            var checkedPairs = new HashSet<ulong>();
+            Collider[] scene = Object.FindObjectsByType<Collider>(FindObjectsInactive.Exclude);
+            var checkedPairs = new HashSet<(EntityId First, EntityId Second)>();
             foreach (Collider a in vehicle)
             foreach (Collider b in scene)
             {
@@ -124,12 +124,13 @@ namespace LaunchRamp.Vehicle
                     CheckPenetration(a, b, checkedPairs, report, issues);
         }
 
-        private static void CheckPenetration(Collider a, Collider b, HashSet<ulong> checkedPairs,
+        private static void CheckPenetration(Collider a, Collider b,
+            HashSet<(EntityId First, EntityId Second)> checkedPairs,
             StringBuilder report, List<string> issues)
         {
-            uint first = (uint)Mathf.Min(a.GetInstanceID(), b.GetInstanceID());
-            uint second = (uint)Mathf.Max(a.GetInstanceID(), b.GetInstanceID());
-            ulong key = ((ulong)first << 32) | second;
+            EntityId aId = a.GetEntityId();
+            EntityId bId = b.GetEntityId();
+            (EntityId First, EntityId Second) key = aId < bId ? (aId, bId) : (bId, aId);
             if (!checkedPairs.Add(key) || !a.enabled || !b.enabled || a.isTrigger || b.isTrigger) return;
 
             if (Physics.ComputePenetration(a, a.transform.position, a.transform.rotation,
