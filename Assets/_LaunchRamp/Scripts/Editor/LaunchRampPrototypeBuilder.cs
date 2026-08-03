@@ -40,23 +40,43 @@ namespace LaunchRamp.Editor
         private const float MinimumBodyClearance = .5f;
 
         private enum TrailerCollisionStage { WheelsOnly, UnsupportedBodyOnlySled, Full }
+        private enum TrailerWheelMode { Normal, SphereSupports, LowForwardFriction, LowSidewaysFriction, LowBothFriction }
 
         [MenuItem("Launch Ramp/Build Vehicle Physics Prototype")]
-        public static void Build() => BuildPrototype(ConnectTrailer, TrailerCollisionStage.Full);
+        public static void Build() => BuildPrototype(ConnectTrailer, TrailerCollisionStage.Full, TrailerWheelMode.Normal);
 
         [MenuItem("Launch Ramp/Build Truck-Only Physics Prototype")]
-        public static void BuildTruckOnly() => BuildPrototype(false, TrailerCollisionStage.Full);
+        public static void BuildTruckOnly() => BuildPrototype(false, TrailerCollisionStage.Full, TrailerWheelMode.Normal);
 
         [MenuItem("Launch Ramp/Diagnostics/Build Connected Stage A - Wheels Only")]
-        public static void BuildConnectedWheelsOnly() => BuildPrototype(true, TrailerCollisionStage.WheelsOnly);
+        public static void BuildConnectedWheelsOnly() => BuildPrototype(true, TrailerCollisionStage.WheelsOnly, TrailerWheelMode.Normal);
 
         [MenuItem("Launch Ramp/Diagnostics/Build Connected Stage B - UNSUPPORTED Body Sled")]
-        public static void BuildConnectedBodyOnly() => BuildPrototype(true, TrailerCollisionStage.UnsupportedBodyOnlySled);
+        public static void BuildConnectedBodyOnly() => BuildPrototype(true, TrailerCollisionStage.UnsupportedBodyOnlySled, TrailerWheelMode.Normal);
 
         [MenuItem("Launch Ramp/Diagnostics/Build Connected Stage C - Full Trailer")]
-        public static void BuildConnectedFull() => BuildPrototype(true, TrailerCollisionStage.Full);
+        public static void BuildConnectedFull() => BuildPrototype(true, TrailerCollisionStage.Full, TrailerWheelMode.Normal);
 
-        private static void BuildPrototype(bool connectTrailer, TrailerCollisionStage trailerStage)
+        [MenuItem("Launch Ramp/Diagnostics/Trailer Ground A - Sphere Supports")]
+        public static void BuildSphereSupportTrailer() => BuildPrototype(true, TrailerCollisionStage.Full, TrailerWheelMode.SphereSupports);
+
+        [MenuItem("Launch Ramp/Diagnostics/Trailer Ground B - Low Forward Friction")]
+        public static void BuildLowForwardTrailer() => BuildPrototype(true, TrailerCollisionStage.Full, TrailerWheelMode.LowForwardFriction);
+
+        [MenuItem("Launch Ramp/Diagnostics/Trailer Ground C - Low Sideways Friction")]
+        public static void BuildLowSidewaysTrailer() => BuildPrototype(true, TrailerCollisionStage.Full, TrailerWheelMode.LowSidewaysFriction);
+
+        [MenuItem("Launch Ramp/Diagnostics/Trailer Ground D - Low Both Frictions")]
+        public static void BuildLowBothTrailer() => BuildPrototype(true, TrailerCollisionStage.Full, TrailerWheelMode.LowBothFriction);
+
+        [MenuItem("Launch Ramp/Diagnostics/Trailer Rolling Resistance Force Test")]
+        public static void BuildTrailerRollingTest()
+        {
+            BuildPrototype(false, TrailerCollisionStage.Full, TrailerWheelMode.Normal, true);
+        }
+
+        private static void BuildPrototype(bool connectTrailer, TrailerCollisionStage trailerStage,
+            TrailerWheelMode wheelMode, bool addRollingResistanceTest = false)
         {
             try
             {
@@ -66,7 +86,7 @@ namespace LaunchRamp.Editor
                 GameObject root = new(RootName);
                 SceneManager.MoveGameObjectToScene(root, scene);
                 Rigidbody truck = BuildTruck(root.transform);
-                BuildTrailer(root.transform, truck, connectTrailer, trailerStage);
+                BuildTrailer(root.transform, truck, connectTrailer, trailerStage, wheelMode);
                 Rigidbody trailer = root.transform.Find("Trailer").GetComponent<Rigidbody>();
                 Transform truckHitch = truck.transform.Find("HitchPoint");
                 Transform trailerHitch = trailer.transform.Find("HitchPoint");
@@ -76,7 +96,10 @@ namespace LaunchRamp.Editor
                 if (connectTrailer)
                     root.AddComponent<TrailerRigDiagnostics>().Configure(truck, trailer, hitchJoint, truckHitch,
                         trailerHitch, truck.GetComponentsInChildren<WheelCollider>(true),
-                        trailer.GetComponentsInChildren<WheelCollider>(true));
+                        trailer.GetComponentsInChildren<WheelCollider>(true), trailer.GetComponent<BoxCollider>(),
+                        FindGroundCollider(scene));
+                if (addRollingResistanceTest)
+                    trailer.gameObject.AddComponent<TrailerRollingResistanceTest>().Configure(trailer);
                 BuildCourse(root.transform);
                 BuildCameras(scene, root, truck.transform.Find("DriverCameraMount"));
                 root.AddComponent<VehiclePhysicsValidator>().Configure(connectTrailer);
@@ -232,7 +255,7 @@ namespace LaunchRamp.Editor
         }
 
         private static void BuildTrailer(Transform parent, Rigidbody truckBody, bool connectTrailer,
-            TrailerCollisionStage collisionStage)
+            TrailerCollisionStage collisionStage, TrailerWheelMode wheelMode)
         {
             GameObject trailer = Group("Trailer", parent).gameObject;
             // Connected mode makes both local hitch anchors coincide exactly in world space.
@@ -257,11 +280,21 @@ namespace LaunchRamp.Editor
             {
                 string name = i == 0 ? "TrailerLeft" : "TrailerRight";
                 Transform mount = Group(name + "Collider", wheelGroup); mount.localPosition = positions[i];
-                wheels[i] = new PrototypeTrailer.WheelBinding { Collider = TrailerWheel(mount.gameObject),
-                    Visual = WheelVisual(name + "Visual", trailer.transform, positions[i]) };
-                wheels[i].Collider.enabled = collisionStage != TrailerCollisionStage.UnsupportedBodyOnlySled;
-                wheels[i].Collider.motorTorque = 0f;
-                wheels[i].Collider.brakeTorque = 0f;
+                Transform visual = WheelVisual(name + "Visual", trailer.transform, positions[i]);
+                if (wheelMode == TrailerWheelMode.SphereSupports)
+                {
+                    SphereCollider support = mount.gameObject.AddComponent<SphereCollider>();
+                    support.radius = WheelRadius;
+                    wheels[i] = new PrototypeTrailer.WheelBinding { Collider = null, Visual = visual };
+                }
+                else
+                {
+                    WheelCollider wheel = TrailerWheel(mount.gameObject, wheelMode);
+                    wheel.enabled = collisionStage != TrailerCollisionStage.UnsupportedBodyOnlySled;
+                    wheel.motorTorque = 0f;
+                    wheel.brakeTorque = 0f;
+                    wheels[i] = new PrototypeTrailer.WheelBinding { Collider = wheel, Visual = visual };
+                }
             }
             Transform hitch = Group("HitchPoint", trailer.transform); hitch.localPosition = new(0f, 0f, 2.65f);
             Primitive("TrailerTongue", PrimitiveType.Cube, trailer.transform, new(0f, .05f, 2.075f),
@@ -309,8 +342,18 @@ namespace LaunchRamp.Editor
         private static WheelCollider TruckWheel(GameObject target) =>
             ConfigureWheel(target, TruckSuspensionSpring, TruckSuspensionDamper);
 
-        private static WheelCollider TrailerWheel(GameObject target) =>
-            ConfigureWheel(target, TrailerSuspensionSpring, TrailerSuspensionDamper);
+        private static WheelCollider TrailerWheel(GameObject target, TrailerWheelMode mode)
+        {
+            WheelCollider wheel = ConfigureWheel(target, TrailerSuspensionSpring, TrailerSuspensionDamper);
+            wheel.wheelDampingRate = .05f;
+            WheelFrictionCurve forward = wheel.forwardFriction;
+            WheelFrictionCurve sideways = wheel.sidewaysFriction;
+            if (mode is TrailerWheelMode.LowForwardFriction or TrailerWheelMode.LowBothFriction) forward.stiffness = .05f;
+            if (mode is TrailerWheelMode.LowSidewaysFriction or TrailerWheelMode.LowBothFriction) sideways.stiffness = .05f;
+            wheel.forwardFriction = forward;
+            wheel.sidewaysFriction = sideways;
+            return wheel;
+        }
 
         private static WheelCollider ConfigureWheel(GameObject target, float springStrength, float damperStrength)
         {
@@ -322,6 +365,13 @@ namespace LaunchRamp.Editor
             spring.spring = springStrength; spring.damper = damperStrength; spring.targetPosition = .5f;
             wheel.suspensionSpring = spring;
             return wheel;
+        }
+
+        private static Collider FindGroundCollider(Scene scene)
+        {
+            foreach (GameObject root in scene.GetRootGameObjects())
+                if (root.name == GroundName) return root.GetComponent<Collider>();
+            return null;
         }
 
         private static Transform WheelVisual(string name, Transform parent, Vector3 position)

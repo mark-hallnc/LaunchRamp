@@ -14,6 +14,8 @@ namespace LaunchRamp.Trailer
         [SerializeField] private Transform trailerHitch;
         [SerializeField] private WheelCollider[] truckWheels;
         [SerializeField] private WheelCollider[] trailerWheels;
+        [SerializeField] private BoxCollider trailerBodyCollider;
+        [SerializeField] private Collider groundCollider;
         [SerializeField] private bool logWhileThrottleHeld = true;
         [SerializeField, Min(.01f)] private float separationErrorDistance = .08f;
         [SerializeField, Min(1f)] private float excessiveTrailerAngularSpeed = 6f;
@@ -22,7 +24,7 @@ namespace LaunchRamp.Trailer
 
         public void Configure(Rigidbody truck, Rigidbody trailer, ConfigurableJoint joint,
             Transform truckAnchor, Transform trailerAnchor, WheelCollider[] truckWheelColliders,
-            WheelCollider[] trailerWheelColliders)
+            WheelCollider[] trailerWheelColliders, BoxCollider trailerBody, Collider ground)
         {
             truckBody = truck;
             trailerBody = trailer;
@@ -31,6 +33,8 @@ namespace LaunchRamp.Trailer
             trailerHitch = trailerAnchor;
             truckWheels = truckWheelColliders;
             trailerWheels = trailerWheelColliders;
+            trailerBodyCollider = trailerBody;
+            groundCollider = ground;
         }
 
         private void Start()
@@ -67,11 +71,23 @@ namespace LaunchRamp.Trailer
             if (!logWhileThrottleHeld || input == null || Mathf.Abs(input.Drive) <= .01f) return;
 
             var message = new StringBuilder(768);
+            float bodyMinimumY = trailerBodyCollider != null ? trailerBodyCollider.bounds.min.y : float.NaN;
+            float groundSurfaceY = groundCollider != null ? groundCollider.bounds.max.y : float.NaN;
+            bool penetrates = false;
+            Vector3 penetrationDirection = Vector3.zero;
+            float penetrationDistance = 0f;
+            if (trailerBodyCollider != null && groundCollider != null)
+                penetrates = Physics.ComputePenetration(trailerBodyCollider, trailerBodyCollider.transform.position,
+                    trailerBodyCollider.transform.rotation, groundCollider, groundCollider.transform.position,
+                    groundCollider.transform.rotation, out penetrationDirection, out penetrationDistance);
             message.AppendLine($"[Launch Ramp] Connected rig: truckSpeed={truckSpeed:F2} m/s, " +
                 $"trailerSpeed={trailerSpeed:F2} m/s, hitchDistance={separation:F4} m, " +
                 $"pitch={relativePitch:F1} deg, yaw={relativeYaw:F1} deg, roll={relativeRoll:F1} deg")
                 .AppendLine($" jointForce={(hitchJoint != null ? hitchJoint.currentForce : Vector3.zero):F2}, " +
-                    $"jointTorque={(hitchJoint != null ? hitchJoint.currentTorque : Vector3.zero):F2}");
+                    $"jointTorque={(hitchJoint != null ? hitchJoint.currentTorque : Vector3.zero):F2}")
+                .AppendLine($" trailerBodyMinY={bodyMinimumY:F3}, groundSurfaceY={groundSurfaceY:F3}, " +
+                    $"touchingGround={bodyMinimumY <= groundSurfaceY + .005f}, penetratesGround={penetrates}, " +
+                    $"penetrationDirection={penetrationDirection:F2}, penetrationDistance={penetrationDistance:F4} m");
             foreach (WheelCollider wheel in truckWheels)
                 if (wheel != null && Mathf.Abs(wheel.motorTorque) > .01f)
                     message.AppendLine($" truck driven wheel {wheel.name}: rpm={wheel.rpm:F1}, motorTorque={wheel.motorTorque:F1} Nm");
@@ -81,8 +97,12 @@ namespace LaunchRamp.Trailer
                 bool hasHit = wheel.GetGroundHit(out WheelHit hit);
                 message.AppendLine($" trailer wheel {wheel.name}: enabled={wheel.enabled}, rpm={wheel.rpm:F1}, " +
                     $"motorTorque={wheel.motorTorque:F1}, brakeTorque={wheel.brakeTorque:F1}, grounded={wheel.isGrounded}, " +
-                    $"forwardSlip={(hasHit ? hit.forwardSlip : 0f):F3}, sidewaysSlip={(hasHit ? hit.sidewaysSlip : 0f):F3}");
+                    $"forwardSlip={(hasHit ? hit.forwardSlip : 0f):F3}, sidewaysSlip={(hasHit ? hit.sidewaysSlip : 0f):F3}, " +
+                    $"contactForce={(hasHit ? hit.force : 0f):F1} N, damping={wheel.wheelDampingRate:F2}");
             }
+            if (penetrates)
+                Debug.LogError($"[Launch Ramp] Trailer body penetrates TestGround by {penetrationDistance:F4} m " +
+                    $"along {penetrationDirection:F2}.", this);
             Debug.Log(message.ToString(), this);
         }
 
