@@ -28,19 +28,31 @@ namespace LaunchRamp.Editor
         private const float MotorTorque = 2100f, BrakeTorque = 3600f, ParkingBrakeTorque = 6500f;
         private const float SteerAngle = 30f, ReverseEngagementSpeed = 1.5f;
         private static readonly Vector3 TruckSize = new(2.2f, 1f, 4.8f);
-        private static readonly Vector3 TrailerSize = new(2.35f, .8f, 5f);
+        private static readonly Vector3 TrailerSize = new(2.35f, .8f, 4f);
         private static readonly Vector3 TruckColliderSize = new(2.1f, .4f, 4.6f);
         private static readonly Vector3 TruckColliderCenter = new(0f, .4f, 0f);
-        private static readonly Vector3 TrailerColliderSize = new(2.25f, .4f, 4.8f);
-        private static readonly Vector3 TrailerColliderCenter = new(0f, .42f, 0f);
+        private static readonly Vector3 TrailerColliderSize = new(2.25f, .4f, 4f);
+        private static readonly Vector3 TrailerColliderCenter = new(0f, .42f, -.5f);
+        private const float MinimumBodyClearance = .5f;
+
+        private enum TrailerCollisionStage { WheelsOnly, BodyOnly, Full }
 
         [MenuItem("Launch Ramp/Build Vehicle Physics Prototype")]
-        public static void Build() => BuildPrototype(ConnectTrailer);
+        public static void Build() => BuildPrototype(ConnectTrailer, TrailerCollisionStage.Full);
 
         [MenuItem("Launch Ramp/Build Truck-Only Physics Prototype")]
-        public static void BuildTruckOnly() => BuildPrototype(false);
+        public static void BuildTruckOnly() => BuildPrototype(false, TrailerCollisionStage.Full);
 
-        private static void BuildPrototype(bool connectTrailer)
+        [MenuItem("Launch Ramp/Diagnostics/Build Connected Stage A - Wheels Only")]
+        public static void BuildConnectedWheelsOnly() => BuildPrototype(true, TrailerCollisionStage.WheelsOnly);
+
+        [MenuItem("Launch Ramp/Diagnostics/Build Connected Stage B - Body Only")]
+        public static void BuildConnectedBodyOnly() => BuildPrototype(true, TrailerCollisionStage.BodyOnly);
+
+        [MenuItem("Launch Ramp/Diagnostics/Build Connected Stage C - Full Trailer")]
+        public static void BuildConnectedFull() => BuildPrototype(true, TrailerCollisionStage.Full);
+
+        private static void BuildPrototype(bool connectTrailer, TrailerCollisionStage trailerStage)
         {
             try
             {
@@ -50,14 +62,17 @@ namespace LaunchRamp.Editor
                 GameObject root = new(RootName);
                 SceneManager.MoveGameObjectToScene(root, scene);
                 Rigidbody truck = BuildTruck(root.transform);
-                BuildTrailer(root.transform, truck, connectTrailer);
+                BuildTrailer(root.transform, truck, connectTrailer, trailerStage);
                 Rigidbody trailer = root.transform.Find("Trailer").GetComponent<Rigidbody>();
                 Transform truckHitch = truck.transform.Find("HitchPoint");
                 Transform trailerHitch = trailer.transform.Find("HitchPoint");
                 ConfigurableJoint hitchJoint = trailer.GetComponent<ConfigurableJoint>();
+                ValidateBodyClearance(truck.GetComponent<BoxCollider>(), trailer.GetComponent<BoxCollider>());
                 root.AddComponent<VehicleRigReset>().Configure(truck, trailer);
                 if (connectTrailer)
-                    root.AddComponent<TrailerRigDiagnostics>().Configure(truck, trailer, hitchJoint, truckHitch, trailerHitch);
+                    root.AddComponent<TrailerRigDiagnostics>().Configure(truck, trailer, hitchJoint, truckHitch,
+                        trailerHitch, truck.GetComponentsInChildren<WheelCollider>(true),
+                        trailer.GetComponentsInChildren<WheelCollider>(true));
                 BuildCourse(root.transform);
                 BuildCameras(scene, root, truck.transform.Find("DriverCameraMount"));
                 root.AddComponent<VehiclePhysicsValidator>().Configure(connectTrailer);
@@ -210,7 +225,8 @@ namespace LaunchRamp.Editor
             return body;
         }
 
-        private static void BuildTrailer(Transform parent, Rigidbody truckBody, bool connectTrailer)
+        private static void BuildTrailer(Transform parent, Rigidbody truckBody, bool connectTrailer,
+            TrailerCollisionStage collisionStage)
         {
             GameObject trailer = Group("Trailer", parent).gameObject;
             // Connected mode makes both local hitch anchors coincide exactly in world space.
@@ -225,7 +241,8 @@ namespace LaunchRamp.Editor
             BoxCollider trailerCollider = trailer.AddComponent<BoxCollider>();
             trailerCollider.size = TrailerColliderSize;
             trailerCollider.center = TrailerColliderCenter;
-            Primitive("TrailerBody", PrimitiveType.Cube, trailer.transform, Vector3.zero, TrailerSize, true);
+            trailerCollider.enabled = collisionStage != TrailerCollisionStage.WheelsOnly;
+            Primitive("TrailerBody", PrimitiveType.Cube, trailer.transform, new(0f, 0f, -.5f), TrailerSize, true);
 
             Transform wheelGroup = Group("Wheels", trailer.transform);
             Vector3[] positions = { new(-1.12f, -.35f, -.75f), new(1.12f, -.35f, -.75f) };
@@ -236,10 +253,13 @@ namespace LaunchRamp.Editor
                 Transform mount = Group(name + "Collider", wheelGroup); mount.localPosition = positions[i];
                 wheels[i] = new PrototypeTrailer.WheelBinding { Collider = Wheel(mount.gameObject),
                     Visual = WheelVisual(name + "Visual", trailer.transform, positions[i]) };
+                wheels[i].Collider.enabled = collisionStage != TrailerCollisionStage.BodyOnly;
+                wheels[i].Collider.motorTorque = 0f;
+                wheels[i].Collider.brakeTorque = 0f;
             }
             Transform hitch = Group("HitchPoint", trailer.transform); hitch.localPosition = new(0f, 0f, 2.65f);
-            Primitive("TrailerTongue", PrimitiveType.Cube, trailer.transform, new(0f, .05f, 2.4f),
-                new(.35f, .18f, .5f), true);
+            Primitive("TrailerTongue", PrimitiveType.Cube, trailer.transform, new(0f, .05f, 2.075f),
+                new(.35f, .18f, 1.15f), true);
             if (connectTrailer)
             {
                 ConfigurableJoint joint = trailer.AddComponent<ConfigurableJoint>();
@@ -248,14 +268,34 @@ namespace LaunchRamp.Editor
                 joint.axis = Vector3.right;
                 joint.secondaryAxis = Vector3.up;
                 joint.xMotion = joint.yMotion = joint.zMotion = ConfigurableJointMotion.Locked;
-                joint.angularXMotion = joint.angularYMotion = joint.angularZMotion = ConfigurableJointMotion.Limited;
-                joint.lowAngularXLimit = new SoftJointLimit { limit = -20f };
-                joint.highAngularXLimit = new SoftJointLimit { limit = 20f };
-                joint.angularYLimit = new SoftJointLimit { limit = 35f };
+                joint.angularXMotion = ConfigurableJointMotion.Free;
+                joint.angularYMotion = ConfigurableJointMotion.Free;
+                joint.angularZMotion = ConfigurableJointMotion.Limited;
                 joint.angularZLimit = new SoftJointLimit { limit = 10f };
                 joint.enableCollision = false;
             }
             trailer.AddComponent<PrototypeTrailer>().Configure(wheels);
+        }
+
+        private static void ValidateBodyClearance(BoxCollider truckCollider, BoxCollider trailerCollider)
+        {
+            if (truckCollider == null || trailerCollider == null)
+                throw new InvalidOperationException("Truck or trailer body BoxCollider is missing.");
+
+            Physics.SyncTransforms();
+            Vector3 truckCenter = truckCollider.transform.TransformPoint(truckCollider.center);
+            Vector3 trailerCenter = trailerCollider.transform.TransformPoint(trailerCollider.center);
+            float truckHalfZ = truckCollider.size.z * Mathf.Abs(truckCollider.transform.lossyScale.z) * .5f;
+            float trailerHalfZ = trailerCollider.size.z * Mathf.Abs(trailerCollider.transform.lossyScale.z) * .5f;
+            float truckMinZ = truckCenter.z - truckHalfZ;
+            float truckMaxZ = truckCenter.z + truckHalfZ;
+            float trailerMinZ = trailerCenter.z - trailerHalfZ;
+            float trailerMaxZ = trailerCenter.z + trailerHalfZ;
+            float longitudinalGap = Mathf.Max(trailerMinZ - truckMaxZ, truckMinZ - trailerMaxZ);
+            if (longitudinalGap < MinimumBodyClearance)
+                throw new InvalidOperationException($"Truck/trailer solid body clearance is {longitudinalGap:F3} m; " +
+                    $"at least {MinimumBodyClearance:F3} m is required. Truck Z=[{truckMinZ:F3}, " +
+                    $"{truckMaxZ:F3}], Trailer Z=[{trailerMinZ:F3}, {trailerMaxZ:F3}].");
         }
 
         private static WheelCollider Wheel(GameObject target)
