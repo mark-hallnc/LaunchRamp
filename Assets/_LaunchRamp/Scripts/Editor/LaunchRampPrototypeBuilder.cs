@@ -38,12 +38,16 @@ namespace LaunchRamp.Editor
         private const string RightMirrorTexturePath = "Assets/_LaunchRamp/Materials/RightMirrorRenderTexture.renderTexture";
         private const string LeftMirrorMaterialPath = "Assets/_LaunchRamp/Materials/LeftMirrorPrototype.mat";
         private const string RightMirrorMaterialPath = "Assets/_LaunchRamp/Materials/RightMirrorPrototype.mat";
+        private static readonly Vector3 DriverEyePosition = new(-.50f, 1.62f, .45f);
         private static readonly Vector3 LeftMirrorPosition = new(-1.12f, 1.52f, 1.28f);
         private static readonly Vector3 RightMirrorPosition = new(1.12f, 1.52f, 1.28f);
-        private static readonly Vector3 LeftMirrorEulerAim = new(3f, 168f, 0f);
-        private static readonly Vector3 RightMirrorEulerAim = new(3f, 192f, 0f);
+        private static readonly Vector3 LeftMirrorCameraPosition = new(-1.18f, 1.54f, 1.32f);
+        private static readonly Vector3 RightMirrorCameraPosition = new(1.18f, 1.54f, 1.32f);
+        private static readonly Vector3 LeftMirrorCameraEuler = new(2f, 190f, 0f);
+        private static readonly Vector3 RightMirrorCameraEuler = new(2f, 169f, 0f);
+        private const float LeftMirrorSurfaceYawOffset = 0f, RightMirrorSurfaceYawOffset = 0f;
         private const float MirrorWidth = .64f, MirrorHeight = .30f, MirrorThickness = .06f;
-        private const float MirrorCameraFieldOfView = 42f;
+        private const float MirrorFieldOfView = 42f;
         private const float MotorTorque = 2100f, BrakeTorque = 3600f, ParkingBrakeTorque = 6500f;
         private const float SteerAngle = 30f, ReverseEngagementSpeed = 1.5f;
         private static readonly Vector3 TruckSize = new(2.2f, 1f, 4.8f);
@@ -219,29 +223,34 @@ namespace LaunchRamp.Editor
             exterior.farClipPlane = 180f;
             exteriorTransform.gameObject.AddComponent<AudioListener>();
 
-            (UnityEngine.Camera leftMirror, UnityEngine.Camera rightMirror) = BuildMirrors(root.transform.Find("Truck"));
-            BuildMirrorDebug(root, leftMirror, rightMirror,
+            (UnityEngine.Camera leftMirror, UnityEngine.Camera rightMirror, Transform leftSurface, Transform rightSurface) =
+                BuildMirrors(root.transform.Find("Truck"), driverMount);
+            BuildMirrorDebug(root, leftMirror, rightMirror, leftSurface, rightSurface, driverMount,
                 leftMirror.targetTexture, rightMirror.targetTexture);
             root.AddComponent<PrototypeCameraSwitcher>().Configure(driver, diagnostic, exterior, target,
                 root.transform.Find("Truck"));
         }
 
-        private static (UnityEngine.Camera left, UnityEngine.Camera right) BuildMirrors(Transform truck)
+        private static (UnityEngine.Camera left, UnityEngine.Camera right, Transform leftSurface, Transform rightSurface)
+            BuildMirrors(Transform truck, Transform driverEye)
         {
-            if (truck == null) throw new InvalidOperationException("Truck was not available for mirror creation.");
+            if (truck == null || driverEye == null)
+                throw new InvalidOperationException("Truck or DriverCameraMount was not available for mirror creation.");
             int mirrorLayer = EnsureLayer(MirrorSurfaceLayerName);
             RenderTexture leftTexture = EnsureRenderTexture(LeftMirrorTexturePath);
             RenderTexture rightTexture = EnsureRenderTexture(RightMirrorTexturePath);
             Material leftMaterial = EnsureMirrorMaterial(LeftMirrorMaterialPath, leftTexture);
             Material rightMaterial = EnsureMirrorMaterial(RightMirrorMaterialPath, rightTexture);
 
-            UnityEngine.Camera left = CreateMirrorCamera("LeftMirrorCamera", truck, LeftMirrorPosition,
-                LeftMirrorEulerAim, leftTexture, mirrorLayer);
-            UnityEngine.Camera right = CreateMirrorCamera("RightMirrorCamera", truck, RightMirrorPosition,
-                RightMirrorEulerAim, rightTexture, mirrorLayer);
-            CreateMirrorAssembly("LeftMirror", truck, LeftMirrorPosition, leftMaterial, mirrorLayer);
-            CreateMirrorAssembly("RightMirror", truck, RightMirrorPosition, rightMaterial, mirrorLayer);
-            return (left, right);
+            UnityEngine.Camera left = CreateMirrorCamera("LeftMirrorCamera", truck, LeftMirrorCameraPosition,
+                LeftMirrorCameraEuler, leftTexture, mirrorLayer);
+            UnityEngine.Camera right = CreateMirrorCamera("RightMirrorCamera", truck, RightMirrorCameraPosition,
+                RightMirrorCameraEuler, rightTexture, mirrorLayer);
+            Transform leftSurface = CreateMirrorAssembly("LeftMirror", truck, LeftMirrorPosition,
+                leftMaterial, mirrorLayer, driverEye, LeftMirrorSurfaceYawOffset);
+            Transform rightSurface = CreateMirrorAssembly("RightMirror", truck, RightMirrorPosition,
+                rightMaterial, mirrorLayer, driverEye, RightMirrorSurfaceYawOffset);
+            return (left, right, leftSurface, rightSurface);
         }
 
         private static UnityEngine.Camera CreateMirrorCamera(string name, Transform parent, Vector3 position,
@@ -253,7 +262,7 @@ namespace LaunchRamp.Editor
             UnityEngine.Camera camera = value.gameObject.AddComponent<UnityEngine.Camera>();
             camera.targetTexture = texture;
             camera.enabled = true;
-            camera.fieldOfView = MirrorCameraFieldOfView;
+            camera.fieldOfView = MirrorFieldOfView;
             camera.nearClipPlane = .05f;
             camera.farClipPlane = 120f;
             camera.clearFlags = CameraClearFlags.SolidColor;
@@ -264,8 +273,8 @@ namespace LaunchRamp.Editor
             return camera;
         }
 
-        private static void CreateMirrorAssembly(string name, Transform parent, Vector3 position,
-            Material displayMaterial, int mirrorLayer)
+        private static Transform CreateMirrorAssembly(string name, Transform parent, Vector3 position,
+            Material displayMaterial, int mirrorLayer, Transform driverEye, float additionalYaw)
         {
             Transform assembly = Group(name + "Assembly", parent);
             assembly.localPosition = position;
@@ -276,9 +285,17 @@ namespace LaunchRamp.Editor
                 new(0f, 0f, .035f), new(MirrorWidth + .06f, MirrorHeight + .06f, MirrorThickness), true);
             GameObject display = Primitive("MirrorSurface", PrimitiveType.Quad, assembly,
                 new(0f, 0f, 0f), new(MirrorWidth, MirrorHeight, 1f), true);
+            Vector3 directionToDriver = assembly.InverseTransformDirection(driverEye.position - display.transform.position);
+            directionToDriver.y = 0f;
+            if (directionToDriver.sqrMagnitude < .001f)
+                throw new InvalidOperationException($"{name} cannot aim at a coincident DriverCameraMount.");
+            // A Unity Quad's visible normal is -forward, so forward points away from the driver.
+            display.transform.localRotation = Quaternion.LookRotation(-directionToDriver.normalized, Vector3.up) *
+                Quaternion.Euler(0f, additionalYaw, 0f);
             SetMaterial(housing, mirrorHousingMaterial);
             SetMaterial(display, displayMaterial);
             housing.layer = display.layer = mirrorLayer;
+            return display.transform;
         }
 
         private static RenderTexture EnsureRenderTexture(string path)
@@ -360,6 +377,7 @@ namespace LaunchRamp.Editor
         }
 
         private static void BuildMirrorDebug(GameObject root, UnityEngine.Camera left, UnityEngine.Camera right,
+            Transform leftSurface, Transform rightSurface, Transform driverEye,
             RenderTexture leftTexture, RenderTexture rightTexture)
         {
             GameObject canvasObject = new("MirrorDebugCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
@@ -379,10 +397,11 @@ namespace LaunchRamp.Editor
             rect.anchorMin = rect.anchorMax = new Vector2(.5f, 0f);
             rect.pivot = new Vector2(.5f, 0f);
             rect.anchoredPosition = new Vector2(0f, 22f);
-            rect.sizeDelta = new Vector2(530f, 80f);
+            rect.sizeDelta = new Vector2(780f, 112f);
             TextMeshProUGUI label = textObject.GetComponent<TextMeshProUGUI>();
             label.fontSize = 16f; label.color = Color.white; label.alignment = TextAlignmentOptions.TopRight;
-            root.AddComponent<PrototypeMirrorDebug>().Configure(canvasObject, left, right, label);
+            root.AddComponent<PrototypeMirrorDebug>().Configure(canvasObject, left, right, leftSurface,
+                rightSurface, driverEye, label);
         }
 
         private static void CreateMirrorViewport(string name, string labelText, Transform parent,
@@ -448,7 +467,7 @@ namespace LaunchRamp.Editor
             }
             Transform hitch = Group("HitchPoint", truck.transform); hitch.localPosition = new(0f, 0f, -2.65f);
             SetMaterial(Primitive("HitchVisual", PrimitiveType.Sphere, hitch, Vector3.zero, new(.18f, .18f, .18f), true), hitchMaterial);
-            Transform camera = Group("DriverCameraMount", truck.transform); camera.localPosition = new(-.52f, 1.55f, 1.1f);
+            Transform camera = Group("DriverCameraMount", truck.transform); camera.localPosition = DriverEyePosition;
             truck.AddComponent<VehicleInputReader>();
             truck.AddComponent<PrototypeTruckController>().Configure(wheels, MotorTorque, BrakeTorque,
                 ParkingBrakeTorque, SteerAngle, ReverseEngagementSpeed);

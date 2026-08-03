@@ -190,14 +190,20 @@ namespace LaunchRamp.Camera
         [SerializeField] private GameObject overlay;
         [SerializeField] private UnityEngine.Camera leftMirrorCamera;
         [SerializeField] private UnityEngine.Camera rightMirrorCamera;
+        [SerializeField] private Transform leftMirrorSurface;
+        [SerializeField] private Transform rightMirrorSurface;
+        [SerializeField] private Transform driverEye;
         [SerializeField] private TMP_Text details;
         private InputAction _toggle;
         private bool _visible;
         private bool _validated;
 
-        public void Configure(GameObject overlayRoot, UnityEngine.Camera left, UnityEngine.Camera right, TMP_Text label)
+        public void Configure(GameObject overlayRoot, UnityEngine.Camera left, UnityEngine.Camera right,
+            Transform leftSurface, Transform rightSurface, Transform configuredDriverEye, TMP_Text label)
         {
-            overlay = overlayRoot; leftMirrorCamera = left; rightMirrorCamera = right; details = label;
+            overlay = overlayRoot; leftMirrorCamera = left; rightMirrorCamera = right;
+            leftMirrorSurface = leftSurface; rightMirrorSurface = rightSurface;
+            driverEye = configuredDriverEye; details = label;
             if (overlay != null) overlay.SetActive(false);
         }
 
@@ -232,9 +238,15 @@ namespace LaunchRamp.Camera
             if (!_visible) return;
             DrawAim(leftMirrorCamera, Color.cyan);
             DrawAim(rightMirrorCamera, Color.magenta);
+            DrawDriverSightLine(leftMirrorSurface, Color.green);
+            DrawDriverSightLine(rightMirrorSurface, Color.yellow);
             if (details != null && leftMirrorCamera != null && rightMirrorCamera != null)
-                details.text = $"MIRROR TUNING\nLeft FOV {leftMirrorCamera.fieldOfView:F0} deg  aim {leftMirrorCamera.transform.localEulerAngles}\n" +
-                               $"Right FOV {rightMirrorCamera.fieldOfView:F0} deg  aim {rightMirrorCamera.transform.localEulerAngles}";
+                details.text = $"MIRROR TUNING | target truck strip: 10-20% (verify panels)\n" +
+                    $"Driver eye {Format(driverEye != null ? driverEye.localPosition : Vector3.zero)}\n" +
+                    $"Left pos {Format(leftMirrorCamera.transform.localPosition)} aim {Format(leftMirrorCamera.transform.localEulerAngles)} " +
+                    $"FOV {leftMirrorCamera.fieldOfView:F0} deg\n" +
+                    $"Right pos {Format(rightMirrorCamera.transform.localPosition)} aim {Format(rightMirrorCamera.transform.localEulerAngles)} " +
+                    $"FOV {rightMirrorCamera.fieldOfView:F0} deg";
         }
 
         private void OnToggle(InputAction.CallbackContext context)
@@ -247,6 +259,14 @@ namespace LaunchRamp.Camera
         {
             if (camera != null) Debug.DrawRay(camera.transform.position, camera.transform.forward * 12f, color);
         }
+
+        private void DrawDriverSightLine(Transform surface, Color color)
+        {
+            if (driverEye != null && surface != null)
+                Debug.DrawRay(driverEye.position, surface.position - driverEye.position, color);
+        }
+
+        private static string Format(Vector3 value) => $"({value.x:F2}, {value.y:F2}, {value.z:F2})";
 
         private static void ValidateMirrorCamera(string side, UnityEngine.Camera camera)
         {
