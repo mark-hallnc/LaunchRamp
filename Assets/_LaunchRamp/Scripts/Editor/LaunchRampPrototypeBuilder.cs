@@ -22,8 +22,7 @@ namespace LaunchRamp.Editor
         private const string RootName = "VehiclePrototype";
         private const string GroundName = "TestGround";
         private const string CourseName = "DiagnosticCourse";
-        // Standalone drivetrain isolation switch. Re-enable only after truck-only testing passes.
-        private const bool ConnectTrailer = false;
+        private const bool ConnectTrailer = true;
         private const float TruckMass = 2200f, TrailerMass = 1700f;
         private const float WheelRadius = .52f, WheelWidth = .34f, SuspensionDistance = .28f;
         private const float MotorTorque = 2100f, BrakeTorque = 3600f, ParkingBrakeTorque = 6500f;
@@ -36,7 +35,12 @@ namespace LaunchRamp.Editor
         private static readonly Vector3 TrailerColliderCenter = new(0f, .42f, 0f);
 
         [MenuItem("Launch Ramp/Build Vehicle Physics Prototype")]
-        public static void Build()
+        public static void Build() => BuildPrototype(ConnectTrailer);
+
+        [MenuItem("Launch Ramp/Build Truck-Only Physics Prototype")]
+        public static void BuildTruckOnly() => BuildPrototype(false);
+
+        private static void BuildPrototype(bool connectTrailer)
         {
             try
             {
@@ -46,10 +50,17 @@ namespace LaunchRamp.Editor
                 GameObject root = new(RootName);
                 SceneManager.MoveGameObjectToScene(root, scene);
                 Rigidbody truck = BuildTruck(root.transform);
-                BuildTrailer(root.transform, truck, ConnectTrailer);
+                BuildTrailer(root.transform, truck, connectTrailer);
+                Rigidbody trailer = root.transform.Find("Trailer").GetComponent<Rigidbody>();
+                Transform truckHitch = truck.transform.Find("HitchPoint");
+                Transform trailerHitch = trailer.transform.Find("HitchPoint");
+                ConfigurableJoint hitchJoint = trailer.GetComponent<ConfigurableJoint>();
+                root.AddComponent<VehicleRigReset>().Configure(truck, trailer);
+                if (connectTrailer)
+                    root.AddComponent<TrailerRigDiagnostics>().Configure(truck, trailer, hitchJoint, truckHitch, trailerHitch);
                 BuildCourse(root.transform);
                 BuildCameras(scene, root, truck.transform.Find("DriverCameraMount"));
-                root.AddComponent<VehiclePhysicsValidator>().Configure(ConnectTrailer);
+                root.AddComponent<VehiclePhysicsValidator>().Configure(connectTrailer);
                 EnsureLight(scene);
                 EditorSceneManager.MarkSceneDirty(scene);
                 if (!EditorSceneManager.SaveScene(scene, ScenePath))
@@ -227,6 +238,8 @@ namespace LaunchRamp.Editor
                     Visual = WheelVisual(name + "Visual", trailer.transform, positions[i]) };
             }
             Transform hitch = Group("HitchPoint", trailer.transform); hitch.localPosition = new(0f, 0f, 2.65f);
+            Primitive("TrailerTongue", PrimitiveType.Cube, trailer.transform, new(0f, .05f, 2.4f),
+                new(.35f, .18f, .5f), true);
             if (connectTrailer)
             {
                 ConfigurableJoint joint = trailer.AddComponent<ConfigurableJoint>();

@@ -24,6 +24,7 @@ namespace LaunchRamp.Vehicle
         [SerializeField, Min(0f)] private float parkingBrakeTorque = 6500f;
         [SerializeField, Range(0f, 45f)] private float maximumSteerAngle = 30f;
         [SerializeField, Min(0f)] private float reverseEngagementSpeed = 1.5f;
+        [SerializeField] private bool enableDetailedDrivetrainDiagnostics;
 
         private Rigidbody _body;
         private VehicleInputReader _input;
@@ -55,7 +56,8 @@ namespace LaunchRamp.Vehicle
                     changingDirection ? serviceBrakeTorque * Mathf.Abs(drive) : 0f;
             }
 
-            if (Mathf.Abs(drive) > .01f && Time.unscaledTime >= _nextDiagnosticLogTime)
+            if (enableDetailedDrivetrainDiagnostics && Mathf.Abs(drive) > .01f &&
+                Time.unscaledTime >= _nextDiagnosticLogTime)
             {
                 float brake = changingDirection ? Mathf.Abs(drive) : 0f;
                 var message = new StringBuilder(512);
