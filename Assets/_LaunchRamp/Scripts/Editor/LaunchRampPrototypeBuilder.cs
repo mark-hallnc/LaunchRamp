@@ -94,10 +94,16 @@ namespace LaunchRamp.Editor
                 ValidateBodyClearance(truck.GetComponent<BoxCollider>(), trailer.GetComponent<BoxCollider>());
                 root.AddComponent<VehicleRigReset>().Configure(truck, trailer);
                 if (connectTrailer)
-                    root.AddComponent<TrailerRigDiagnostics>().Configure(truck, trailer, hitchJoint, truckHitch,
-                        trailerHitch, truck.GetComponentsInChildren<WheelCollider>(true),
-                        trailer.GetComponentsInChildren<WheelCollider>(true), trailer.GetComponent<BoxCollider>(),
-                        FindGroundCollider(scene));
+                    root.AddComponent<TrailerRigDiagnostics>().Configure(
+                        truck,
+                        trailer,
+                        trailer.GetComponent<BoxCollider>(),
+                        FindGroundCollider(scene),
+                        hitchJoint,
+                        trailer.GetComponentsInChildren<WheelCollider>(true),
+                        truckHitch,
+                        trailerHitch,
+                        truck.GetComponentsInChildren<WheelCollider>(true));
                 if (addRollingResistanceTest)
                     trailer.gameObject.AddComponent<TrailerRollingResistanceTest>().Configure(trailer);
                 BuildCourse(root.transform);

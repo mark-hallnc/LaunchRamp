@@ -22,23 +22,30 @@ namespace LaunchRamp.Trailer
 
         private float _nextCheckTime;
 
-        public void Configure(Rigidbody truck, Rigidbody trailer, ConfigurableJoint joint,
-            Transform truckAnchor, Transform trailerAnchor, WheelCollider[] truckWheelColliders,
-            WheelCollider[] trailerWheelColliders, BoxCollider trailerBody, Collider ground)
+        public void Configure(Rigidbody configuredTruckBody, Rigidbody configuredTrailerBody,
+            BoxCollider configuredTrailerBodyCollider, Collider configuredGroundCollider,
+            ConfigurableJoint configuredHitchJoint, WheelCollider[] configuredTrailerWheels,
+            Transform truckAnchor, Transform trailerAnchor, WheelCollider[] configuredTruckWheels)
         {
-            truckBody = truck;
-            trailerBody = trailer;
-            hitchJoint = joint;
+            truckBody = configuredTruckBody;
+            trailerBody = configuredTrailerBody;
+            trailerBodyCollider = configuredTrailerBodyCollider;
+            groundCollider = configuredGroundCollider;
+            hitchJoint = configuredHitchJoint;
+            trailerWheels = configuredTrailerWheels;
             truckHitch = truckAnchor;
             trailerHitch = trailerAnchor;
-            truckWheels = truckWheelColliders;
-            trailerWheels = trailerWheelColliders;
-            trailerBodyCollider = trailerBody;
-            groundCollider = ground;
+            truckWheels = configuredTruckWheels;
         }
 
         private void Start()
         {
+            if (trailerBody == null)
+                Debug.LogError("[Launch Ramp] Trailer rig diagnostics is missing the trailer Rigidbody.", this);
+            if (trailerBodyCollider == null)
+                Debug.LogError("[Launch Ramp] Trailer rig diagnostics is missing the trailer body BoxCollider.", this);
+            if (groundCollider == null)
+                Debug.LogError("[Launch Ramp] Trailer rig diagnostics is missing the TestGround Collider.", this);
             if (hitchJoint == null || hitchJoint.connectedBody != truckBody)
                 Debug.LogError("[Launch Ramp] Invalid trailer hitch: joint or connected truck Rigidbody is missing.", this);
         }
