@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -180,6 +181,64 @@ namespace LaunchRamp.Camera
             target.enabled = active;
             AudioListener listener = target.GetComponent<AudioListener>();
             if (listener != null) listener.enabled = active;
+        }
+    }
+
+    /// <summary>Development-only mirror viewport and aim visualization, toggled with F4.</summary>
+    public sealed class PrototypeMirrorDebug : MonoBehaviour
+    {
+        [SerializeField] private GameObject overlay;
+        [SerializeField] private UnityEngine.Camera leftMirrorCamera;
+        [SerializeField] private UnityEngine.Camera rightMirrorCamera;
+        [SerializeField] private TMP_Text details;
+        private InputAction _toggle;
+        private bool _visible;
+
+        public void Configure(GameObject overlayRoot, UnityEngine.Camera left, UnityEngine.Camera right, TMP_Text label)
+        {
+            overlay = overlayRoot; leftMirrorCamera = left; rightMirrorCamera = right; details = label;
+            if (overlay != null) overlay.SetActive(false);
+        }
+
+        private void Awake()
+        {
+            _toggle = new InputAction("Toggle Mirror Debug", InputActionType.Button, "<Keyboard>/f4");
+            if (overlay != null) overlay.SetActive(false);
+        }
+
+        private void OnEnable()
+        {
+            _toggle?.Enable();
+            if (_toggle != null) _toggle.performed += OnToggle;
+        }
+
+        private void OnDisable()
+        {
+            if (_toggle != null) _toggle.performed -= OnToggle;
+            _toggle?.Disable();
+        }
+
+        private void OnDestroy() => _toggle?.Dispose();
+
+        private void Update()
+        {
+            if (!_visible) return;
+            DrawAim(leftMirrorCamera, Color.cyan);
+            DrawAim(rightMirrorCamera, Color.magenta);
+            if (details != null && leftMirrorCamera != null && rightMirrorCamera != null)
+                details.text = $"MIRROR TUNING\nLeft FOV {leftMirrorCamera.fieldOfView:F0} deg  aim {leftMirrorCamera.transform.localEulerAngles}\n" +
+                               $"Right FOV {rightMirrorCamera.fieldOfView:F0} deg  aim {rightMirrorCamera.transform.localEulerAngles}";
+        }
+
+        private void OnToggle(InputAction.CallbackContext context)
+        {
+            _visible = !_visible && (Debug.isDebugBuild || Application.isEditor);
+            if (overlay != null) overlay.SetActive(_visible);
+        }
+
+        private static void DrawAim(UnityEngine.Camera camera, Color color)
+        {
+            if (camera != null) Debug.DrawRay(camera.transform.position, camera.transform.forward * 12f, color);
         }
     }
 }
