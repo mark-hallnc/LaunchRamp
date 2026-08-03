@@ -252,9 +252,12 @@ namespace LaunchRamp.Editor
             value.localRotation = Quaternion.Euler(euler);
             UnityEngine.Camera camera = value.gameObject.AddComponent<UnityEngine.Camera>();
             camera.targetTexture = texture;
+            camera.enabled = true;
             camera.fieldOfView = MirrorCameraFieldOfView;
             camera.nearClipPlane = .05f;
             camera.farClipPlane = 120f;
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = new Color(.18f, .22f, .28f, 1f);
             camera.cullingMask &= ~(1 << mirrorLayer);
             UniversalAdditionalCameraData data = value.gameObject.AddComponent<UniversalAdditionalCameraData>();
             data.renderShadows = false;
@@ -266,11 +269,12 @@ namespace LaunchRamp.Editor
         {
             Transform assembly = Group(name + "Assembly", parent);
             assembly.localPosition = position;
-            // The display faces the cab; its source camera independently looks rearward.
-            assembly.localRotation = Quaternion.Euler(0f, 180f, 0f);
-            GameObject housing = Primitive(name + "Housing", PrimitiveType.Cube, assembly,
+            // Unity's Quad visible normal faces the driver (-local Z) in this placement.
+            // Rotating it 180 degrees exposes its back face and makes the black housing appear solid.
+            assembly.localRotation = Quaternion.identity;
+            GameObject housing = Primitive("MirrorHousing", PrimitiveType.Cube, assembly,
                 new(0f, 0f, .035f), new(MirrorWidth + .06f, MirrorHeight + .06f, MirrorThickness), true);
-            GameObject display = Primitive(name + "Surface", PrimitiveType.Quad, assembly,
+            GameObject display = Primitive("MirrorSurface", PrimitiveType.Quad, assembly,
                 new(0f, 0f, 0f), new(MirrorWidth, MirrorHeight, 1f), true);
             SetMaterial(housing, mirrorHousingMaterial);
             SetMaterial(display, displayMaterial);
@@ -298,14 +302,18 @@ namespace LaunchRamp.Editor
         private static Material EnsureMirrorMaterial(string path, RenderTexture texture)
         {
             Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+            if (shader == null) shader = Shader.Find("Unlit/Texture");
+            if (shader == null) throw new InvalidOperationException("No compatible unlit mirror-display shader was available.");
             if (material == null)
             {
-                Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-                if (shader == null) shader = Shader.Find("Unlit/Texture");
                 material = new Material(shader) { name = Path.GetFileNameWithoutExtension(path) };
                 AssetDatabase.CreateAsset(material, path);
             }
+            else material.shader = shader;
             material.mainTexture = texture;
+            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", Color.white);
+            if (material.HasProperty("_Color")) material.SetColor("_Color", Color.white);
             // A negative U scale makes the rear camera feed read like a physical mirror.
             material.mainTextureScale = new Vector2(-1f, 1f);
             material.mainTextureOffset = new Vector2(1f, 0f);
@@ -363,28 +371,43 @@ namespace LaunchRamp.Editor
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1920f, 1080f);
 
-            CreateMirrorViewport("LeftMirrorViewport", canvasObject.transform, leftTexture, new Vector2(-550f, -20f));
-            CreateMirrorViewport("RightMirrorViewport", canvasObject.transform, rightTexture, new Vector2(-278f, -20f));
+            CreateMirrorViewport("LeftMirrorViewport", "LEFT MIRROR", canvasObject.transform, leftTexture, true);
+            CreateMirrorViewport("RightMirrorViewport", "RIGHT MIRROR", canvasObject.transform, rightTexture, false);
             GameObject textObject = new("MirrorAimDetails", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
             textObject.transform.SetParent(canvasObject.transform, false);
             RectTransform rect = textObject.GetComponent<RectTransform>();
-            rect.anchorMin = rect.anchorMax = rect.pivot = Vector2.one;
-            rect.anchoredPosition = new Vector2(-20f, -160f);
+            rect.anchorMin = rect.anchorMax = new Vector2(.5f, 0f);
+            rect.pivot = new Vector2(.5f, 0f);
+            rect.anchoredPosition = new Vector2(0f, 22f);
             rect.sizeDelta = new Vector2(530f, 80f);
             TextMeshProUGUI label = textObject.GetComponent<TextMeshProUGUI>();
             label.fontSize = 16f; label.color = Color.white; label.alignment = TextAlignmentOptions.TopRight;
             root.AddComponent<PrototypeMirrorDebug>().Configure(canvasObject, left, right, label);
         }
 
-        private static void CreateMirrorViewport(string name, Transform parent, RenderTexture texture, Vector2 position)
+        private static void CreateMirrorViewport(string name, string labelText, Transform parent,
+            RenderTexture texture, bool left)
         {
             GameObject value = new(name, typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
             value.transform.SetParent(parent, false);
             RectTransform rect = value.GetComponent<RectTransform>();
-            rect.anchorMin = rect.anchorMax = rect.pivot = Vector2.one;
-            rect.anchoredPosition = position;
-            rect.sizeDelta = new Vector2(256f, 128f);
-            value.GetComponent<RawImage>().texture = texture;
+            Vector2 corner = left ? Vector2.zero : new Vector2(1f, 0f);
+            rect.anchorMin = rect.anchorMax = rect.pivot = corner;
+            rect.anchoredPosition = left ? new Vector2(22f, 22f) : new Vector2(-22f, 22f);
+            rect.sizeDelta = new Vector2(420f, 210f);
+            RawImage image = value.GetComponent<RawImage>();
+            image.texture = texture;
+            image.uvRect = new Rect(1f, 0f, -1f, 1f);
+
+            GameObject labelObject = new("Label", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+            labelObject.transform.SetParent(value.transform, false);
+            RectTransform labelRect = labelObject.GetComponent<RectTransform>();
+            labelRect.anchorMin = new Vector2(0f, 1f); labelRect.anchorMax = Vector2.one;
+            labelRect.pivot = new Vector2(.5f, 0f); labelRect.anchoredPosition = new Vector2(0f, 5f);
+            labelRect.sizeDelta = new Vector2(0f, 28f);
+            TextMeshProUGUI label = labelObject.GetComponent<TextMeshProUGUI>();
+            label.text = labelText; label.fontSize = 19f; label.fontStyle = FontStyles.Bold;
+            label.color = Color.white; label.alignment = TextAlignmentOptions.Center;
         }
 
         private static UnityEngine.Camera CreateCamera(string name, Transform parent, Vector3 localPosition,
@@ -467,10 +490,12 @@ namespace LaunchRamp.Editor
                 joint.secondaryAxis = Vector3.up;
                 joint.xMotion = joint.yMotion = joint.zMotion = ConfigurableJointMotion.Locked;
                 joint.angularXMotion = ConfigurableJointMotion.Limited;
-                joint.angularYMotion = ConfigurableJointMotion.Free;
+                // Joint axes map to trailer pitch (X), articulation/yaw (Y), and roll (Z).
+                joint.angularYMotion = ConfigurableJointMotion.Limited;
                 joint.angularZMotion = ConfigurableJointMotion.Limited;
                 joint.lowAngularXLimit = new SoftJointLimit { limit = -20f };
                 joint.highAngularXLimit = new SoftJointLimit { limit = 20f };
+                joint.angularYLimit = new SoftJointLimit { limit = 80f };
                 joint.angularZLimit = new SoftJointLimit { limit = 8f };
                 joint.enableCollision = false;
             }

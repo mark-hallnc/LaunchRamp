@@ -193,6 +193,7 @@ namespace LaunchRamp.Camera
         [SerializeField] private TMP_Text details;
         private InputAction _toggle;
         private bool _visible;
+        private bool _validated;
 
         public void Configure(GameObject overlayRoot, UnityEngine.Camera left, UnityEngine.Camera right, TMP_Text label)
         {
@@ -222,6 +223,12 @@ namespace LaunchRamp.Camera
 
         private void Update()
         {
+            if (!_validated && Time.frameCount > 2)
+            {
+                _validated = true;
+                ValidateMirrorCamera("LEFT", leftMirrorCamera);
+                ValidateMirrorCamera("RIGHT", rightMirrorCamera);
+            }
             if (!_visible) return;
             DrawAim(leftMirrorCamera, Color.cyan);
             DrawAim(rightMirrorCamera, Color.magenta);
@@ -239,6 +246,26 @@ namespace LaunchRamp.Camera
         private static void DrawAim(UnityEngine.Camera camera, Color color)
         {
             if (camera != null) Debug.DrawRay(camera.transform.position, camera.transform.forward * 12f, color);
+        }
+
+        private static void ValidateMirrorCamera(string side, UnityEngine.Camera camera)
+        {
+            if (camera == null)
+            {
+                Debug.LogError($"[Launch Ramp] {side} mirror camera is missing.");
+                return;
+            }
+            if (!camera.enabled) Debug.LogError($"[Launch Ramp] {side} mirror camera is disabled.", camera);
+            if (camera.targetTexture == null)
+                Debug.LogError($"[Launch Ramp] {side} mirror camera has no target RenderTexture.", camera);
+            else if (!camera.targetTexture.IsCreated())
+                Debug.LogError($"[Launch Ramp] {side} mirror RenderTexture is not active.", camera.targetTexture);
+            if ((camera.cullingMask & 1) == 0)
+                Debug.LogError($"[Launch Ramp] {side} mirror camera excludes the Default layer used by the rig/course.", camera);
+            if (camera.nearClipPlane >= camera.farClipPlane)
+                Debug.LogError($"[Launch Ramp] {side} mirror camera has invalid clipping planes.", camera);
+            if (camera.transform.parent != null && Vector3.Dot(camera.transform.forward, -camera.transform.parent.forward) < .7f)
+                Debug.LogError($"[Launch Ramp] {side} mirror camera is not aimed rearward.", camera);
         }
     }
 }

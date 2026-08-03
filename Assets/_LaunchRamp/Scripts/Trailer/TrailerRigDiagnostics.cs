@@ -17,8 +17,12 @@ namespace LaunchRamp.Trailer
         [SerializeField] private bool logWhileThrottleHeld;
         [SerializeField, Min(.01f)] private float separationErrorDistance = .08f;
         [SerializeField, Min(1f)] private float excessiveTrailerAngularSpeed = 6f;
+        [SerializeField, Range(1f, 89f)] private float jackknifeWarningAngle = 70f;
+        [SerializeField, Range(1f, 89f)] private float jackknifeCriticalAngle = 78f;
 
         private float _nextCheckTime;
+        private bool _jackknifeWarningIssued;
+        private bool _jackknifeCriticalIssued;
 
         public void Configure(Rigidbody configuredTruckBody, Rigidbody configuredTrailerBody,
             BoxCollider configuredTrailerBodyCollider, Collider configuredGroundCollider,
@@ -68,6 +72,29 @@ namespace LaunchRamp.Trailer
                 Debug.LogError($"[Launch Ramp] Excessive relative trailer roll: {relativeRoll:F1} degrees.", this);
             if (trailerAngularSpeed > excessiveTrailerAngularSpeed)
                 Debug.LogError($"[Launch Ramp] Excessive trailer angular velocity: {trailerAngularSpeed:F2} rad/s.", this);
+
+            float absoluteYaw = Mathf.Abs(relativeYaw);
+            if (absoluteYaw >= jackknifeCriticalAngle)
+            {
+                if (!_jackknifeCriticalIssued)
+                    Debug.LogError($"[Launch Ramp] CRITICAL jackknife angle: trailer yaw is {relativeYaw:F1} degrees " +
+                        $"(physical limit {(hitchJoint != null ? hitchJoint.angularYLimit.limit : 0f):F1} degrees).", this);
+                _jackknifeCriticalIssued = true;
+                _jackknifeWarningIssued = true;
+            }
+            else if (absoluteYaw >= jackknifeWarningAngle)
+            {
+                if (!_jackknifeWarningIssued)
+                    Debug.LogWarning($"[Launch Ramp] Jackknife warning: trailer yaw is {relativeYaw:F1} degrees.", this);
+                _jackknifeWarningIssued = true;
+                _jackknifeCriticalIssued = false;
+            }
+            else if (absoluteYaw < jackknifeWarningAngle - 5f)
+            {
+                // Hysteresis permits a new warning after the rig returns to a clearly safe articulation.
+                _jackknifeWarningIssued = false;
+                _jackknifeCriticalIssued = false;
+            }
 
             VehicleInputReader input = truckBody.GetComponent<VehicleInputReader>();
             if (!logWhileThrottleHeld || input == null || Mathf.Abs(input.Drive) <= .01f) return;
