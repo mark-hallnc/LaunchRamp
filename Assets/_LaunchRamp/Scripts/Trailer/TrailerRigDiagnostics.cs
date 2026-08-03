@@ -16,7 +16,7 @@ namespace LaunchRamp.Trailer
         [SerializeField] private WheelCollider[] trailerWheels;
         [SerializeField] private bool logWhileThrottleHeld = true;
         [SerializeField, Min(.01f)] private float separationErrorDistance = .08f;
-        [SerializeField, Min(1f)] private float excessiveAngularSpeed = 8f;
+        [SerializeField, Min(1f)] private float excessiveTrailerAngularSpeed = 6f;
 
         private float _nextCheckTime;
 
@@ -46,22 +46,30 @@ namespace LaunchRamp.Trailer
             _nextCheckTime = Time.unscaledTime + 1f;
 
             float separation = Vector3.Distance(truckHitch.position, trailerHitch.position);
-            float articulation = Quaternion.Angle(truckBody.rotation, trailerBody.rotation);
+            Vector3 relativeAngles = NormalizeAngles((Quaternion.Inverse(truckBody.rotation) * trailerBody.rotation).eulerAngles);
+            float relativePitch = relativeAngles.x;
+            float relativeYaw = relativeAngles.y;
+            float relativeRoll = relativeAngles.z;
             float truckSpeed = truckBody.linearVelocity.magnitude;
             float trailerSpeed = trailerBody.linearVelocity.magnitude;
-            float maximumAngularSpeed = Mathf.Max(truckBody.angularVelocity.magnitude, trailerBody.angularVelocity.magnitude);
+            float trailerAngularSpeed = trailerBody.angularVelocity.magnitude;
 
             if (separation > separationErrorDistance)
                 Debug.LogError($"[Launch Ramp] Hitch separation is {separation:F3} m; expected below {separationErrorDistance:F3} m.", this);
-            if (maximumAngularSpeed > excessiveAngularSpeed)
-                Debug.LogError($"[Launch Ramp] Excessive rig angular velocity detected: {maximumAngularSpeed:F2} rad/s.", this);
+            if (Mathf.Abs(relativePitch) > 25f)
+                Debug.LogError($"[Launch Ramp] Excessive relative trailer pitch on flat ground: {relativePitch:F1} degrees.", this);
+            if (Mathf.Abs(relativeRoll) > 15f)
+                Debug.LogError($"[Launch Ramp] Excessive relative trailer roll: {relativeRoll:F1} degrees.", this);
+            if (trailerAngularSpeed > excessiveTrailerAngularSpeed)
+                Debug.LogError($"[Launch Ramp] Excessive trailer angular velocity: {trailerAngularSpeed:F2} rad/s.", this);
 
             VehicleInputReader input = truckBody.GetComponent<VehicleInputReader>();
             if (!logWhileThrottleHeld || input == null || Mathf.Abs(input.Drive) <= .01f) return;
 
             var message = new StringBuilder(768);
             message.AppendLine($"[Launch Ramp] Connected rig: truckSpeed={truckSpeed:F2} m/s, " +
-                $"trailerSpeed={trailerSpeed:F2} m/s, hitchDistance={separation:F4} m, articulation={articulation:F1} deg")
+                $"trailerSpeed={trailerSpeed:F2} m/s, hitchDistance={separation:F4} m, " +
+                $"pitch={relativePitch:F1} deg, yaw={relativeYaw:F1} deg, roll={relativeRoll:F1} deg")
                 .AppendLine($" jointForce={(hitchJoint != null ? hitchJoint.currentForce : Vector3.zero):F2}, " +
                     $"jointTorque={(hitchJoint != null ? hitchJoint.currentTorque : Vector3.zero):F2}");
             foreach (WheelCollider wheel in truckWheels)
@@ -77,5 +85,10 @@ namespace LaunchRamp.Trailer
             }
             Debug.Log(message.ToString(), this);
         }
+
+        private static Vector3 NormalizeAngles(Vector3 angles) => new(
+            Mathf.DeltaAngle(0f, angles.x),
+            Mathf.DeltaAngle(0f, angles.y),
+            Mathf.DeltaAngle(0f, angles.z));
     }
 }

@@ -25,6 +25,10 @@ namespace LaunchRamp.Editor
         private const bool ConnectTrailer = true;
         private const float TruckMass = 2200f, TrailerMass = 1700f;
         private const float WheelRadius = .52f, WheelWidth = .34f, SuspensionDistance = .28f;
+        private const float TruckSuspensionSpring = 38000f, TruckSuspensionDamper = 5200f;
+        // 1700 kg / 2 wheels = 850 kg per wheel. At ~1.5 Hz and 0.7 damping ratio:
+        // k = m(2*pi*f)^2 ~= 75.5 kN/m; c = 2*zeta*sqrt(k*m) ~= 11.2 kN*s/m.
+        private const float TrailerSuspensionSpring = 76000f, TrailerSuspensionDamper = 11000f;
         private const float MotorTorque = 2100f, BrakeTorque = 3600f, ParkingBrakeTorque = 6500f;
         private const float SteerAngle = 30f, ReverseEngagementSpeed = 1.5f;
         private static readonly Vector3 TruckSize = new(2.2f, 1f, 4.8f);
@@ -35,7 +39,7 @@ namespace LaunchRamp.Editor
         private static readonly Vector3 TrailerColliderCenter = new(0f, .42f, -.5f);
         private const float MinimumBodyClearance = .5f;
 
-        private enum TrailerCollisionStage { WheelsOnly, BodyOnly, Full }
+        private enum TrailerCollisionStage { WheelsOnly, UnsupportedBodyOnlySled, Full }
 
         [MenuItem("Launch Ramp/Build Vehicle Physics Prototype")]
         public static void Build() => BuildPrototype(ConnectTrailer, TrailerCollisionStage.Full);
@@ -46,8 +50,8 @@ namespace LaunchRamp.Editor
         [MenuItem("Launch Ramp/Diagnostics/Build Connected Stage A - Wheels Only")]
         public static void BuildConnectedWheelsOnly() => BuildPrototype(true, TrailerCollisionStage.WheelsOnly);
 
-        [MenuItem("Launch Ramp/Diagnostics/Build Connected Stage B - Body Only")]
-        public static void BuildConnectedBodyOnly() => BuildPrototype(true, TrailerCollisionStage.BodyOnly);
+        [MenuItem("Launch Ramp/Diagnostics/Build Connected Stage B - UNSUPPORTED Body Sled")]
+        public static void BuildConnectedBodyOnly() => BuildPrototype(true, TrailerCollisionStage.UnsupportedBodyOnlySled);
 
         [MenuItem("Launch Ramp/Diagnostics/Build Connected Stage C - Full Trailer")]
         public static void BuildConnectedFull() => BuildPrototype(true, TrailerCollisionStage.Full);
@@ -82,6 +86,8 @@ namespace LaunchRamp.Editor
                     throw new InvalidOperationException($"Unity could not save '{ScenePath}'.");
                 Selection.activeGameObject = root;
                 Debug.Log($"[Launch Ramp] Vehicle physics prototype built and saved successfully: {ScenePath}", root);
+                if (trailerStage == TrailerCollisionStage.UnsupportedBodyOnlySled)
+                    Debug.LogWarning("[Launch Ramp] Stage B is an unsupported sled diagnostic: disabling trailer wheels intentionally prevents normal towing.", root);
             }
             catch (OperationCanceledException e) { Debug.LogWarning($"[Launch Ramp] Build cancelled: {e.Message}"); }
             catch (Exception e) { Debug.LogError($"[Launch Ramp] Prototype build failed: {e.Message}\n{e}"); }
@@ -214,7 +220,7 @@ namespace LaunchRamp.Editor
             {
                 string name = (i < 2 ? "Front" : "Rear") + (positions[i].x < 0 ? "Left" : "Right");
                 Transform mount = Group(name + "Collider", wheelGroup); mount.localPosition = positions[i];
-                wheels[i] = new PrototypeTruckController.WheelBinding { Collider = Wheel(mount.gameObject),
+                wheels[i] = new PrototypeTruckController.WheelBinding { Collider = TruckWheel(mount.gameObject),
                     Visual = WheelVisual(name + "Visual", truck.transform, positions[i]), Steers = i < 2, Drives = i >= 2 };
             }
             Transform hitch = Group("HitchPoint", truck.transform); hitch.localPosition = new(0f, 0f, -2.65f);
@@ -251,9 +257,9 @@ namespace LaunchRamp.Editor
             {
                 string name = i == 0 ? "TrailerLeft" : "TrailerRight";
                 Transform mount = Group(name + "Collider", wheelGroup); mount.localPosition = positions[i];
-                wheels[i] = new PrototypeTrailer.WheelBinding { Collider = Wheel(mount.gameObject),
+                wheels[i] = new PrototypeTrailer.WheelBinding { Collider = TrailerWheel(mount.gameObject),
                     Visual = WheelVisual(name + "Visual", trailer.transform, positions[i]) };
-                wheels[i].Collider.enabled = collisionStage != TrailerCollisionStage.BodyOnly;
+                wheels[i].Collider.enabled = collisionStage != TrailerCollisionStage.UnsupportedBodyOnlySled;
                 wheels[i].Collider.motorTorque = 0f;
                 wheels[i].Collider.brakeTorque = 0f;
             }
@@ -268,10 +274,12 @@ namespace LaunchRamp.Editor
                 joint.axis = Vector3.right;
                 joint.secondaryAxis = Vector3.up;
                 joint.xMotion = joint.yMotion = joint.zMotion = ConfigurableJointMotion.Locked;
-                joint.angularXMotion = ConfigurableJointMotion.Free;
+                joint.angularXMotion = ConfigurableJointMotion.Limited;
                 joint.angularYMotion = ConfigurableJointMotion.Free;
                 joint.angularZMotion = ConfigurableJointMotion.Limited;
-                joint.angularZLimit = new SoftJointLimit { limit = 10f };
+                joint.lowAngularXLimit = new SoftJointLimit { limit = -20f };
+                joint.highAngularXLimit = new SoftJointLimit { limit = 20f };
+                joint.angularZLimit = new SoftJointLimit { limit = 8f };
                 joint.enableCollision = false;
             }
             trailer.AddComponent<PrototypeTrailer>().Configure(wheels);
@@ -298,12 +306,20 @@ namespace LaunchRamp.Editor
                     $"{truckMaxZ:F3}], Trailer Z=[{trailerMinZ:F3}, {trailerMaxZ:F3}].");
         }
 
-        private static WheelCollider Wheel(GameObject target)
+        private static WheelCollider TruckWheel(GameObject target) =>
+            ConfigureWheel(target, TruckSuspensionSpring, TruckSuspensionDamper);
+
+        private static WheelCollider TrailerWheel(GameObject target) =>
+            ConfigureWheel(target, TrailerSuspensionSpring, TrailerSuspensionDamper);
+
+        private static WheelCollider ConfigureWheel(GameObject target, float springStrength, float damperStrength)
         {
+            target.transform.localRotation = Quaternion.identity;
+            target.transform.localScale = Vector3.one;
             WheelCollider wheel = target.AddComponent<WheelCollider>();
             wheel.radius = WheelRadius; wheel.suspensionDistance = SuspensionDistance; wheel.mass = 35f;
             JointSpring spring = wheel.suspensionSpring;
-            spring.spring = 38000f; spring.damper = 5200f; spring.targetPosition = .5f;
+            spring.spring = springStrength; spring.damper = damperStrength; spring.targetPosition = .5f;
             wheel.suspensionSpring = spring;
             return wheel;
         }
