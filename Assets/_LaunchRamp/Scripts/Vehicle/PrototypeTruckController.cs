@@ -1,5 +1,6 @@
 using System;
 using LaunchRamp.Input;
+using System.Text;
 using UnityEngine;
 
 namespace LaunchRamp.Vehicle
@@ -54,12 +55,24 @@ namespace LaunchRamp.Vehicle
                     changingDirection ? serviceBrakeTorque * Mathf.Abs(drive) : 0f;
             }
 
-            if (Mathf.Abs(speed) >= .25f && Time.unscaledTime >= _nextDiagnosticLogTime)
+            if (Mathf.Abs(drive) > .01f && Time.unscaledTime >= _nextDiagnosticLogTime)
             {
                 float brake = changingDirection ? Mathf.Abs(drive) : 0f;
-                Debug.Log($"[Launch Ramp] Speed {speed:F2} m/s ({ForwardSpeedMilesPerHour:F1} mph), " +
-                          $"throttle={drive:F2}, brake={brake:F2}, steering={_input.Steering:F2}, " +
-                          $"parkingBrake={_input.ParkingBrake}", this);
+                var message = new StringBuilder(512);
+                message.Append($"[Launch Ramp] Drivetrain: throttle={drive:F2}, brake={brake:F2}, ")
+                    .Append($"reverse={drive < 0f && !changingDirection}, parkingBrake={_input.ParkingBrake}, ")
+                    .Append($"speed={speed:F2} m/s ({ForwardSpeedMilesPerHour:F1} mph), ")
+                    .AppendLine($"velocityMagnitude={_body.linearVelocity.magnitude:F2} m/s");
+                for (int i = 0; i < wheels.Length; i++)
+                {
+                    WheelBinding wheel = wheels[i];
+                    if (wheel.Collider == null) { message.AppendLine($" wheel[{i}]=UNASSIGNED"); continue; }
+                    message.AppendLine($" wheel[{i}] {wheel.Collider.name}: driven={wheel.Drives}, " +
+                                       $"motorTorque={wheel.Collider.motorTorque:F1} Nm, " +
+                                       $"brakeTorque={wheel.Collider.brakeTorque:F1} Nm, " +
+                                       $"isGrounded={wheel.Collider.isGrounded}");
+                }
+                Debug.Log(message.ToString(), this);
                 _nextDiagnosticLogTime = Time.unscaledTime + 1f;
             }
         }
