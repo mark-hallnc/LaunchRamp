@@ -32,6 +32,10 @@ namespace LaunchRamp.Editor
         private const float TruckSuspensionSpring = 38000f, TruckSuspensionDamper = 5200f;
         private const float TrailerSuspensionSpring = 40000f, TrailerSuspensionDamper = 6000f;
         private const float TrailerLateralGrip = 6000f, TrailerRollingResistance = 100f;
+        private const float TruckHalfWidth = 1.10f;
+        private const float MirrorOutboardExtension = .30f;
+        private const float MirrorTargetOutboardOffset = .15f;
+        private const float MirrorTargetHeightOffset = .65f;
         private const string PrototypeMaterialFolder = "Assets/_LaunchRamp/Materials/Prototype";
         private const string MirrorSurfaceLayerName = "MirrorSurface";
         private const string LeftMirrorTexturePath = "Assets/_LaunchRamp/Materials/LeftMirrorRenderTexture.renderTexture";
@@ -39,22 +43,22 @@ namespace LaunchRamp.Editor
         private const string LeftMirrorMaterialPath = "Assets/_LaunchRamp/Materials/LeftMirrorPrototype.mat";
         private const string RightMirrorMaterialPath = "Assets/_LaunchRamp/Materials/RightMirrorPrototype.mat";
         private static readonly Vector3 DriverEyePosition = new(-.50f, 1.62f, .45f);
-        private static readonly Vector3 LeftMirrorPosition = new(-1.12f, 1.52f, 1.28f);
-        private static readonly Vector3 RightMirrorPosition = new(1.12f, 1.52f, 1.28f);
-        private static readonly Vector3 LeftMirrorCameraPosition = new(-1.18f, 1.54f, 1.32f);
-        private static readonly Vector3 RightMirrorCameraPosition = new(1.18f, 1.54f, 1.32f);
-        private static readonly Vector3 LeftMirrorCameraEuler = new(2f, 190f, 0f);
-        private static readonly Vector3 RightMirrorCameraEuler = new(2f, 169f, 0f);
+        private static readonly Vector3 LeftMirrorPosition = new(-1.38f, 1.52f, 1.28f);
+        private static readonly Vector3 RightMirrorPosition = new(1.38f, 1.52f, 1.28f);
+        private static readonly Vector3 LeftMirrorOpticalPosition = new(-TruckHalfWidth - MirrorOutboardExtension, 1.54f, 1.32f);
+        private static readonly Vector3 RightMirrorOpticalPosition = new(TruckHalfWidth + MirrorOutboardExtension, 1.54f, 1.32f);
+        private static readonly Vector3 LeftMirrorAimTrim = Vector3.zero;
+        private static readonly Vector3 RightMirrorAimTrim = Vector3.zero;
         private const float LeftMirrorSurfaceYawOffset = 0f, RightMirrorSurfaceYawOffset = 0f;
         private const float MirrorWidth = .64f, MirrorHeight = .30f, MirrorThickness = .06f;
         private const float MirrorFieldOfView = 42f;
         private const float MotorTorque = 2100f, BrakeTorque = 3600f, ParkingBrakeTorque = 6500f;
         private const float SteerAngle = 30f, ReverseEngagementSpeed = 1.5f;
         private static readonly Vector3 TruckSize = new(2.2f, 1f, 4.8f);
-        private static readonly Vector3 TrailerSize = new(2.35f, .8f, 4f);
+        private static readonly Vector3 TrailerSize = new(2.2f, .8f, 4f);
         private static readonly Vector3 TruckColliderSize = new(2.1f, .4f, 4.6f);
         private static readonly Vector3 TruckColliderCenter = new(0f, .4f, 0f);
-        private static readonly Vector3 TrailerColliderSize = new(2.25f, .4f, 4f);
+        private static readonly Vector3 TrailerColliderSize = new(2.1f, .4f, 4f);
         private static readonly Vector3 TrailerColliderCenter = new(0f, .42f, -.5f);
         private const float MinimumBodyClearance = .5f;
         private static Material truckMaterial, trailerMaterial, wheelMaterial, groundMaterial;
@@ -223,15 +227,17 @@ namespace LaunchRamp.Editor
             exterior.farClipPlane = 180f;
             exteriorTransform.gameObject.AddComponent<AudioListener>();
 
-            (UnityEngine.Camera leftMirror, UnityEngine.Camera rightMirror, Transform leftSurface, Transform rightSurface) =
+            (UnityEngine.Camera leftMirror, UnityEngine.Camera rightMirror, Transform leftSurface, Transform rightSurface,
+                Vector3 leftAimTarget, Vector3 rightAimTarget) =
                 BuildMirrors(root.transform.Find("Truck"), driverMount);
             BuildMirrorDebug(root, leftMirror, rightMirror, leftSurface, rightSurface, driverMount,
-                leftMirror.targetTexture, rightMirror.targetTexture);
+                leftAimTarget, rightAimTarget, leftMirror.targetTexture, rightMirror.targetTexture);
             root.AddComponent<PrototypeCameraSwitcher>().Configure(driver, diagnostic, exterior, target,
                 root.transform.Find("Truck"));
         }
 
-        private static (UnityEngine.Camera left, UnityEngine.Camera right, Transform leftSurface, Transform rightSurface)
+        private static (UnityEngine.Camera left, UnityEngine.Camera right, Transform leftSurface, Transform rightSurface,
+            Vector3 leftAimTarget, Vector3 rightAimTarget)
             BuildMirrors(Transform truck, Transform driverEye)
         {
             if (truck == null || driverEye == null)
@@ -241,24 +247,34 @@ namespace LaunchRamp.Editor
             RenderTexture rightTexture = EnsureRenderTexture(RightMirrorTexturePath);
             Material leftMaterial = EnsureMirrorMaterial(LeftMirrorMaterialPath, leftTexture);
             Material rightMaterial = EnsureMirrorMaterial(RightMirrorMaterialPath, rightTexture);
+            Transform trailer = truck.parent.Find("Trailer");
+            if (trailer == null) throw new InvalidOperationException("Trailer was not available for mirror calibration.");
+            float trailerRearZ = TrailerColliderCenter.z - TrailerSize.z * .5f;
+            Vector3 leftAimTarget = trailer.TransformPoint(new Vector3(
+                -TruckHalfWidth - MirrorTargetOutboardOffset, MirrorTargetHeightOffset, trailerRearZ));
+            Vector3 rightAimTarget = trailer.TransformPoint(new Vector3(
+                TruckHalfWidth + MirrorTargetOutboardOffset, MirrorTargetHeightOffset, trailerRearZ));
 
-            UnityEngine.Camera left = CreateMirrorCamera("LeftMirrorCamera", truck, LeftMirrorCameraPosition,
-                LeftMirrorCameraEuler, leftTexture, mirrorLayer);
-            UnityEngine.Camera right = CreateMirrorCamera("RightMirrorCamera", truck, RightMirrorCameraPosition,
-                RightMirrorCameraEuler, rightTexture, mirrorLayer);
+            UnityEngine.Camera left = CreateMirrorCamera("LeftMirrorCamera", truck, LeftMirrorOpticalPosition,
+                leftAimTarget, LeftMirrorAimTrim, leftTexture, mirrorLayer);
+            UnityEngine.Camera right = CreateMirrorCamera("RightMirrorCamera", truck, RightMirrorOpticalPosition,
+                rightAimTarget, RightMirrorAimTrim, rightTexture, mirrorLayer);
             Transform leftSurface = CreateMirrorAssembly("LeftMirror", truck, LeftMirrorPosition,
                 leftMaterial, mirrorLayer, driverEye, LeftMirrorSurfaceYawOffset);
             Transform rightSurface = CreateMirrorAssembly("RightMirror", truck, RightMirrorPosition,
                 rightMaterial, mirrorLayer, driverEye, RightMirrorSurfaceYawOffset);
-            return (left, right, leftSurface, rightSurface);
+            return (left, right, leftSurface, rightSurface, leftAimTarget, rightAimTarget);
         }
 
         private static UnityEngine.Camera CreateMirrorCamera(string name, Transform parent, Vector3 position,
-            Vector3 euler, RenderTexture texture, int mirrorLayer)
+            Vector3 worldAimTarget, Vector3 aimTrim, RenderTexture texture, int mirrorLayer)
         {
             Transform value = Group(name, parent);
             value.localPosition = position;
-            value.localRotation = Quaternion.Euler(euler);
+            Vector3 rearwardAim = worldAimTarget - value.position;
+            if (rearwardAim.sqrMagnitude < .001f)
+                throw new InvalidOperationException($"{name} has a coincident mirror aim target.");
+            value.rotation = Quaternion.LookRotation(rearwardAim.normalized, parent.up) * Quaternion.Euler(aimTrim);
             UnityEngine.Camera camera = value.gameObject.AddComponent<UnityEngine.Camera>();
             camera.targetTexture = texture;
             camera.enabled = true;
@@ -378,7 +394,7 @@ namespace LaunchRamp.Editor
 
         private static void BuildMirrorDebug(GameObject root, UnityEngine.Camera left, UnityEngine.Camera right,
             Transform leftSurface, Transform rightSurface, Transform driverEye,
-            RenderTexture leftTexture, RenderTexture rightTexture)
+            Vector3 leftAimTarget, Vector3 rightAimTarget, RenderTexture leftTexture, RenderTexture rightTexture)
         {
             GameObject canvasObject = new("MirrorDebugCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             canvasObject.transform.SetParent(root.transform, false);
@@ -400,8 +416,34 @@ namespace LaunchRamp.Editor
             rect.sizeDelta = new Vector2(780f, 112f);
             TextMeshProUGUI label = textObject.GetComponent<TextMeshProUGUI>();
             label.fontSize = 16f; label.color = Color.white; label.alignment = TextAlignmentOptions.TopRight;
+            Transform markers = BuildMirrorCalibrationMarkers(root.transform, leftAimTarget, rightAimTarget);
             root.AddComponent<PrototypeMirrorDebug>().Configure(canvasObject, left, right, leftSurface,
-                rightSurface, driverEye, label);
+                rightSurface, driverEye, root.transform.Find("Truck"), root.transform.Find("Trailer"), markers.gameObject,
+                leftAimTarget, rightAimTarget, TruckHalfWidth * 2f, TrailerSize.x, MirrorOutboardExtension, label);
+        }
+
+        private static Transform BuildMirrorCalibrationMarkers(Transform root, Vector3 leftAimTarget, Vector3 rightAimTarget)
+        {
+            Transform markers = Group("MirrorCalibrationMarkers", root);
+            Transform truck = root.Find("Truck");
+            Transform trailer = root.Find("Trailer");
+            float truckRearZ = -TruckSize.z * .5f;
+            float trailerRearZ = TrailerColliderCenter.z - TrailerSize.z * .5f;
+            CalibrationMarker("TruckLeftRear", markers, truck.TransformPoint(new Vector3(-TruckHalfWidth, 0f, truckRearZ)), lineMaterial);
+            CalibrationMarker("TruckRightRear", markers, truck.TransformPoint(new Vector3(TruckHalfWidth, 0f, truckRearZ)), lineMaterial);
+            CalibrationMarker("TrailerLeftRear", markers, trailer.TransformPoint(new Vector3(-TruckHalfWidth, 0f, trailerRearZ)), hazardMaterial);
+            CalibrationMarker("TrailerRightRear", markers, trailer.TransformPoint(new Vector3(TruckHalfWidth, 0f, trailerRearZ)), hazardMaterial);
+            CalibrationMarker("LeftMirrorAimTarget", markers, leftAimTarget, targetMaterial);
+            CalibrationMarker("RightMirrorAimTarget", markers, rightAimTarget, hitchMaterial);
+            markers.gameObject.SetActive(false);
+            return markers;
+        }
+
+        private static void CalibrationMarker(string name, Transform parent, Vector3 worldPosition, Material material)
+        {
+            GameObject marker = Primitive(name, PrimitiveType.Sphere, parent, Vector3.zero, new(.16f, .16f, .16f), true);
+            marker.transform.position = worldPosition;
+            SetMaterial(marker, material);
         }
 
         private static void CreateMirrorViewport(string name, string labelText, Transform parent,

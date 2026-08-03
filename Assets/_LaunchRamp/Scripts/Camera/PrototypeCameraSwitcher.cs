@@ -193,24 +193,40 @@ namespace LaunchRamp.Camera
         [SerializeField] private Transform leftMirrorSurface;
         [SerializeField] private Transform rightMirrorSurface;
         [SerializeField] private Transform driverEye;
+        [SerializeField] private Transform truck;
+        [SerializeField] private Transform trailer;
+        [SerializeField] private GameObject calibrationMarkers;
+        [SerializeField] private Vector3 leftAimTarget;
+        [SerializeField] private Vector3 rightAimTarget;
+        [SerializeField] private float truckWidth;
+        [SerializeField] private float trailerWidth;
+        [SerializeField] private float outboardExtension;
         [SerializeField] private TMP_Text details;
         private InputAction _toggle;
         private bool _visible;
         private bool _validated;
 
         public void Configure(GameObject overlayRoot, UnityEngine.Camera left, UnityEngine.Camera right,
-            Transform leftSurface, Transform rightSurface, Transform configuredDriverEye, TMP_Text label)
+            Transform leftSurface, Transform rightSurface, Transform configuredDriverEye,
+            Transform configuredTruck, Transform configuredTrailer, GameObject markerRoot,
+            Vector3 configuredLeftAimTarget, Vector3 configuredRightAimTarget,
+            float configuredTruckWidth, float configuredTrailerWidth, float configuredOutboardExtension, TMP_Text label)
         {
             overlay = overlayRoot; leftMirrorCamera = left; rightMirrorCamera = right;
             leftMirrorSurface = leftSurface; rightMirrorSurface = rightSurface;
-            driverEye = configuredDriverEye; details = label;
+            driverEye = configuredDriverEye; truck = configuredTruck; trailer = configuredTrailer;
+            calibrationMarkers = markerRoot; leftAimTarget = configuredLeftAimTarget; rightAimTarget = configuredRightAimTarget;
+            truckWidth = configuredTruckWidth; trailerWidth = configuredTrailerWidth;
+            outboardExtension = configuredOutboardExtension; details = label;
             if (overlay != null) overlay.SetActive(false);
+            if (calibrationMarkers != null) calibrationMarkers.SetActive(false);
         }
 
         private void Awake()
         {
             _toggle = new InputAction("Toggle Mirror Debug", InputActionType.Button, "<Keyboard>/f4");
             if (overlay != null) overlay.SetActive(false);
+            if (calibrationMarkers != null) calibrationMarkers.SetActive(false);
         }
 
         private void OnEnable()
@@ -242,17 +258,18 @@ namespace LaunchRamp.Camera
             DrawDriverSightLine(rightMirrorSurface, Color.yellow);
             if (details != null && leftMirrorCamera != null && rightMirrorCamera != null)
                 details.text = $"MIRROR TUNING | target truck strip: 10-20% (verify panels)\n" +
-                    $"Driver eye {Format(driverEye != null ? driverEye.localPosition : Vector3.zero)}\n" +
-                    $"Left pos {Format(leftMirrorCamera.transform.localPosition)} aim {Format(leftMirrorCamera.transform.localEulerAngles)} " +
-                    $"FOV {leftMirrorCamera.fieldOfView:F0} deg\n" +
-                    $"Right pos {Format(rightMirrorCamera.transform.localPosition)} aim {Format(rightMirrorCamera.transform.localEulerAngles)} " +
-                    $"FOV {rightMirrorCamera.fieldOfView:F0} deg";
+                    $"Widths truck/trailer {truckWidth:F2}/{trailerWidth:F2} m | outboard {outboardExtension:F2} m | yaw {RelativeYaw():F1} deg\n" +
+                    $"Left local/world {Format(leftMirrorCamera.transform.localPosition)} / {Format(leftMirrorCamera.transform.position)} " +
+                    $"aim {Format(leftAimTarget)} rot {Format(leftMirrorCamera.transform.localEulerAngles)} FOV {leftMirrorCamera.fieldOfView:F0}\n" +
+                    $"Right local/world {Format(rightMirrorCamera.transform.localPosition)} / {Format(rightMirrorCamera.transform.position)} " +
+                    $"aim {Format(rightAimTarget)} rot {Format(rightMirrorCamera.transform.localEulerAngles)} FOV {rightMirrorCamera.fieldOfView:F0}";
         }
 
         private void OnToggle(InputAction.CallbackContext context)
         {
             _visible = !_visible && (Debug.isDebugBuild || Application.isEditor);
             if (overlay != null) overlay.SetActive(_visible);
+            if (calibrationMarkers != null) calibrationMarkers.SetActive(_visible);
         }
 
         private static void DrawAim(UnityEngine.Camera camera, Color color)
@@ -267,6 +284,13 @@ namespace LaunchRamp.Camera
         }
 
         private static string Format(Vector3 value) => $"({value.x:F2}, {value.y:F2}, {value.z:F2})";
+
+        private float RelativeYaw()
+        {
+            if (truck == null || trailer == null) return 0f;
+            Vector3 angles = (Quaternion.Inverse(truck.rotation) * trailer.rotation).eulerAngles;
+            return Mathf.DeltaAngle(0f, angles.y);
+        }
 
         private static void ValidateMirrorCamera(string side, UnityEngine.Camera camera)
         {
