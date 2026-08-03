@@ -18,6 +18,9 @@ namespace LaunchRamp.Camera
         [SerializeField] private float driverLookSensitivity = .12f;
         [SerializeField] private bool returnDriverViewToForward;
         [SerializeField] private float driverReturnSpeed = 45f;
+        [SerializeField] private float driverYawLimit = 110f;
+        [SerializeField] private float quickLookYaw = 105f;
+        [SerializeField] private float quickLookSmoothTime = .22f;
         [SerializeField] private Vector3 exteriorOffset = new(0f, 6f, -10f);
 
         private InputAction _switchCamera;
@@ -25,6 +28,8 @@ namespace LaunchRamp.Camera
         private InputAction _zoom;
         private InputAction _orbitButton;
         private InputAction _exteriorToggle;
+        private InputAction _quickLookLeft;
+        private InputAction _quickLookRight;
         private bool _usingDiagnosticCamera;
         private bool _usingExteriorCamera;
         private bool _previousDiagnosticState;
@@ -33,6 +38,10 @@ namespace LaunchRamp.Camera
         private float _driverYaw;
         private float _driverPitch;
         private Quaternion _driverBaseRotation;
+        private bool _quickLookActive;
+        private bool _quickLookReturning;
+        private float _quickLookReturnYaw;
+        private float _quickLookYawVelocity;
 
         public void Configure(UnityEngine.Camera driver, UnityEngine.Camera diagnostic,
             UnityEngine.Camera exterior, Transform diagnosticLookTarget, Transform followTarget)
@@ -54,6 +63,8 @@ namespace LaunchRamp.Camera
             _zoom = new InputAction("Diagnostic Zoom", InputActionType.Value, "<Mouse>/scroll");
             _orbitButton = new InputAction("Camera Look Button", InputActionType.Button, "<Mouse>/rightButton");
             _exteriorToggle = new InputAction("Exterior Camera", InputActionType.Button, "<Keyboard>/v");
+            _quickLookLeft = new InputAction("Quick Look Left", InputActionType.Button, "<Keyboard>/q");
+            _quickLookRight = new InputAction("Quick Look Right", InputActionType.Button, "<Keyboard>/e");
             InitializeCameraAngles();
             ApplyCameraState();
         }
@@ -65,6 +76,8 @@ namespace LaunchRamp.Camera
             _zoom?.Enable();
             _orbitButton?.Enable();
             _exteriorToggle?.Enable();
+            _quickLookLeft?.Enable();
+            _quickLookRight?.Enable();
             if (_switchCamera != null) _switchCamera.performed += OnSwitchCamera;
             if (_exteriorToggle != null) _exteriorToggle.performed += OnExteriorToggle;
         }
@@ -78,6 +91,8 @@ namespace LaunchRamp.Camera
             _zoom?.Disable();
             _orbitButton?.Disable();
             _exteriorToggle?.Disable();
+            _quickLookLeft?.Disable();
+            _quickLookRight?.Disable();
         }
 
         private void OnDestroy()
@@ -87,6 +102,8 @@ namespace LaunchRamp.Camera
             _zoom?.Dispose();
             _orbitButton?.Dispose();
             _exteriorToggle?.Dispose();
+            _quickLookLeft?.Dispose();
+            _quickLookRight?.Dispose();
         }
 
         private void Update()
@@ -107,18 +124,52 @@ namespace LaunchRamp.Camera
                 }
                 UpdateDiagnosticCamera();
             }
-            else if (_orbitButton?.IsPressed() == true && driverCamera != null)
+            else UpdateDriverView(look);
+        }
+
+        private void UpdateDriverView(Vector2 look)
+        {
+            if (driverCamera == null) return;
+            bool leftHeld = _quickLookLeft?.IsPressed() == true;
+            bool rightHeld = _quickLookRight?.IsPressed() == true;
+            bool quickHeld = leftHeld || rightHeld;
+            if (quickHeld)
             {
-                _driverYaw = Mathf.Clamp(_driverYaw + look.x * driverLookSensitivity, -85f, 85f);
-                _driverPitch = Mathf.Clamp(_driverPitch - look.y * driverLookSensitivity, -35f, 45f);
-                driverCamera.transform.localRotation = _driverBaseRotation * Quaternion.Euler(_driverPitch, _driverYaw, 0f);
+                if (!_quickLookActive)
+                {
+                    _quickLookReturnYaw = _driverYaw;
+                    _quickLookActive = true;
+                    _quickLookReturning = false;
+                }
+                float target = leftHeld && !rightHeld ? -quickLookYaw : quickLookYaw;
+                _driverYaw = Mathf.SmoothDampAngle(_driverYaw, target, ref _quickLookYawVelocity,
+                    quickLookSmoothTime, Mathf.Infinity, Time.deltaTime);
             }
-            else if (returnDriverViewToForward && driverCamera != null)
+            else if ((_quickLookActive || _quickLookReturning) && _orbitButton?.IsPressed() != true)
+            {
+                _quickLookActive = false;
+                _quickLookReturning = true;
+                _driverYaw = Mathf.SmoothDampAngle(_driverYaw, _quickLookReturnYaw, ref _quickLookYawVelocity,
+                    quickLookSmoothTime, Mathf.Infinity, Time.deltaTime);
+                if (Mathf.Abs(Mathf.DeltaAngle(_driverYaw, _quickLookReturnYaw)) < .15f)
+                {
+                    _driverYaw = _quickLookReturnYaw;
+                    _quickLookReturning = false;
+                }
+            }
+            else if (_orbitButton?.IsPressed() == true)
+            {
+                _quickLookActive = _quickLookReturning = false;
+                _quickLookYawVelocity = 0f;
+                _driverYaw = Mathf.Clamp(_driverYaw + look.x * driverLookSensitivity, -driverYawLimit, driverYawLimit);
+                _driverPitch = Mathf.Clamp(_driverPitch - look.y * driverLookSensitivity, -35f, 45f);
+            }
+            else if (returnDriverViewToForward)
             {
                 _driverYaw = Mathf.MoveTowards(_driverYaw, 0f, driverReturnSpeed * Time.deltaTime);
                 _driverPitch = Mathf.MoveTowards(_driverPitch, 0f, driverReturnSpeed * Time.deltaTime);
-                driverCamera.transform.localRotation = _driverBaseRotation * Quaternion.Euler(_driverPitch, _driverYaw, 0f);
             }
+            driverCamera.transform.localRotation = _driverBaseRotation * Quaternion.Euler(_driverPitch, _driverYaw, 0f);
         }
 
         private void OnSwitchCamera(InputAction.CallbackContext context)
@@ -201,6 +252,10 @@ namespace LaunchRamp.Camera
         [SerializeField] private float truckWidth;
         [SerializeField] private float trailerWidth;
         [SerializeField] private float outboardExtension;
+        [SerializeField] private float truckLength;
+        [SerializeField] private float truckWheelbase;
+        [SerializeField] private float trailerLength;
+        [SerializeField] private float hitchToAxleDistance;
         [SerializeField] private TMP_Text details;
         private InputAction _toggle;
         private bool _visible;
@@ -210,14 +265,18 @@ namespace LaunchRamp.Camera
             Transform leftSurface, Transform rightSurface, Transform configuredDriverEye,
             Transform configuredTruck, Transform configuredTrailer, GameObject markerRoot,
             Vector3 configuredLeftAimTarget, Vector3 configuredRightAimTarget,
-            float configuredTruckWidth, float configuredTrailerWidth, float configuredOutboardExtension, TMP_Text label)
+            float configuredTruckWidth, float configuredTrailerWidth, float configuredOutboardExtension,
+            float configuredTruckLength, float configuredTruckWheelbase, float configuredTrailerLength,
+            float configuredHitchToAxleDistance, TMP_Text label)
         {
             overlay = overlayRoot; leftMirrorCamera = left; rightMirrorCamera = right;
             leftMirrorSurface = leftSurface; rightMirrorSurface = rightSurface;
             driverEye = configuredDriverEye; truck = configuredTruck; trailer = configuredTrailer;
             calibrationMarkers = markerRoot; leftAimTarget = configuredLeftAimTarget; rightAimTarget = configuredRightAimTarget;
             truckWidth = configuredTruckWidth; trailerWidth = configuredTrailerWidth;
-            outboardExtension = configuredOutboardExtension; details = label;
+            outboardExtension = configuredOutboardExtension; truckLength = configuredTruckLength;
+            truckWheelbase = configuredTruckWheelbase; trailerLength = configuredTrailerLength;
+            hitchToAxleDistance = configuredHitchToAxleDistance; details = label;
             if (overlay != null) overlay.SetActive(false);
             if (calibrationMarkers != null) calibrationMarkers.SetActive(false);
         }
@@ -259,6 +318,7 @@ namespace LaunchRamp.Camera
             if (details != null && leftMirrorCamera != null && rightMirrorCamera != null)
                 details.text = $"MIRROR TUNING | target truck strip: 10-20% (verify panels)\n" +
                     $"Widths truck/trailer {truckWidth:F2}/{trailerWidth:F2} m | outboard {outboardExtension:F2} m | yaw {RelativeYaw():F1} deg\n" +
+                    $"Lengths truck/trailer {truckLength:F2}/{trailerLength:F2} m | wheelbase {truckWheelbase:F2} m | hitch-axle {hitchToAxleDistance:F2} m\n" +
                     $"Left local/world {Format(leftMirrorCamera.transform.localPosition)} / {Format(leftMirrorCamera.transform.position)} " +
                     $"aim {Format(leftAimTarget)} rot {Format(leftMirrorCamera.transform.localEulerAngles)} FOV {leftMirrorCamera.fieldOfView:F0}\n" +
                     $"Right local/world {Format(rightMirrorCamera.transform.localPosition)} / {Format(rightMirrorCamera.transform.position)} " +

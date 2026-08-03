@@ -42,11 +42,11 @@ namespace LaunchRamp.Editor
         private const string RightMirrorTexturePath = "Assets/_LaunchRamp/Materials/RightMirrorRenderTexture.renderTexture";
         private const string LeftMirrorMaterialPath = "Assets/_LaunchRamp/Materials/LeftMirrorPrototype.mat";
         private const string RightMirrorMaterialPath = "Assets/_LaunchRamp/Materials/RightMirrorPrototype.mat";
-        private static readonly Vector3 DriverEyePosition = new(-.50f, 1.62f, .45f);
-        private static readonly Vector3 LeftMirrorPosition = new(-1.38f, 1.52f, 1.28f);
-        private static readonly Vector3 RightMirrorPosition = new(1.38f, 1.52f, 1.28f);
-        private static readonly Vector3 LeftMirrorOpticalPosition = new(-TruckHalfWidth - MirrorOutboardExtension, 1.54f, 1.32f);
-        private static readonly Vector3 RightMirrorOpticalPosition = new(TruckHalfWidth + MirrorOutboardExtension, 1.54f, 1.32f);
+        private static readonly Vector3 DriverEyePosition = new(-.50f, 1.62f, .50f);
+        private static readonly Vector3 LeftMirrorPosition = new(-1.38f, 1.52f, 1.08f);
+        private static readonly Vector3 RightMirrorPosition = new(1.38f, 1.52f, 1.08f);
+        private static readonly Vector3 LeftMirrorOpticalPosition = new(-TruckHalfWidth - MirrorOutboardExtension, 1.54f, 1.12f);
+        private static readonly Vector3 RightMirrorOpticalPosition = new(TruckHalfWidth + MirrorOutboardExtension, 1.54f, 1.12f);
         private static readonly Vector3 LeftMirrorAimTrim = Vector3.zero;
         private static readonly Vector3 RightMirrorAimTrim = Vector3.zero;
         private const float LeftMirrorSurfaceYawOffset = 0f, RightMirrorSurfaceYawOffset = 0f;
@@ -54,12 +54,16 @@ namespace LaunchRamp.Editor
         private const float MirrorFieldOfView = 42f;
         private const float MotorTorque = 2100f, BrakeTorque = 3600f, ParkingBrakeTorque = 6500f;
         private const float SteerAngle = 30f, ReverseEngagementSpeed = 1.5f;
-        private static readonly Vector3 TruckSize = new(2.2f, 1f, 4.8f);
-        private static readonly Vector3 TrailerSize = new(2.2f, .8f, 4f);
-        private static readonly Vector3 TruckColliderSize = new(2.1f, .4f, 4.6f);
-        private static readonly Vector3 TruckColliderCenter = new(0f, .4f, 0f);
-        private static readonly Vector3 TrailerColliderSize = new(2.1f, .4f, 4f);
-        private static readonly Vector3 TrailerColliderCenter = new(0f, .42f, -.5f);
+        private const float TruckOverallLength = 5.7f, TruckWheelbase = 3.5f;
+        private const float TruckFrontAxleZ = 1.45f, TruckRearAxleZ = -2.05f, TruckHitchZ = -3.05f;
+        private const float TrailerOverallLength = 5.8f, TrailerBodyCenterZ = -.4f;
+        private const float TrailerHitchZ = 3.2f, TrailerAxleZ = -1f, TrailerHitchToAxle = 4.2f;
+        private static readonly Vector3 TruckSize = new(2.2f, .35f, 5.5f);
+        private static readonly Vector3 TrailerSize = new(2.2f, .8f, TrailerOverallLength);
+        private static readonly Vector3 TruckColliderSize = new(2.1f, .4f, 5.6f);
+        private static readonly Vector3 TruckColliderCenter = new(0f, .25f, 0f);
+        private static readonly Vector3 TrailerColliderSize = new(2.1f, .4f, TrailerOverallLength);
+        private static readonly Vector3 TrailerColliderCenter = new(0f, .42f, TrailerBodyCenterZ);
         private const float MinimumBodyClearance = .5f;
         private static Material truckMaterial, trailerMaterial, wheelMaterial, groundMaterial;
         private static Material lineMaterial, targetMaterial, hazardMaterial, hitchMaterial, mirrorHousingMaterial;
@@ -249,7 +253,7 @@ namespace LaunchRamp.Editor
             Material rightMaterial = EnsureMirrorMaterial(RightMirrorMaterialPath, rightTexture);
             Transform trailer = truck.parent.Find("Trailer");
             if (trailer == null) throw new InvalidOperationException("Trailer was not available for mirror calibration.");
-            float trailerRearZ = TrailerColliderCenter.z - TrailerSize.z * .5f;
+            float trailerRearZ = TrailerBodyCenterZ - TrailerOverallLength * .5f;
             Vector3 leftAimTarget = trailer.TransformPoint(new Vector3(
                 -TruckHalfWidth - MirrorTargetOutboardOffset, MirrorTargetHeightOffset, trailerRearZ));
             Vector3 rightAimTarget = trailer.TransformPoint(new Vector3(
@@ -413,13 +417,14 @@ namespace LaunchRamp.Editor
             rect.anchorMin = rect.anchorMax = new Vector2(.5f, 0f);
             rect.pivot = new Vector2(.5f, 0f);
             rect.anchoredPosition = new Vector2(0f, 22f);
-            rect.sizeDelta = new Vector2(780f, 112f);
+            rect.sizeDelta = new Vector2(820f, 140f);
             TextMeshProUGUI label = textObject.GetComponent<TextMeshProUGUI>();
             label.fontSize = 16f; label.color = Color.white; label.alignment = TextAlignmentOptions.TopRight;
             Transform markers = BuildMirrorCalibrationMarkers(root.transform, leftAimTarget, rightAimTarget);
             root.AddComponent<PrototypeMirrorDebug>().Configure(canvasObject, left, right, leftSurface,
                 rightSurface, driverEye, root.transform.Find("Truck"), root.transform.Find("Trailer"), markers.gameObject,
-                leftAimTarget, rightAimTarget, TruckHalfWidth * 2f, TrailerSize.x, MirrorOutboardExtension, label);
+                leftAimTarget, rightAimTarget, TruckHalfWidth * 2f, TrailerSize.x, MirrorOutboardExtension,
+                TruckOverallLength, TruckWheelbase, TrailerOverallLength, TrailerHitchToAxle, label);
         }
 
         private static Transform BuildMirrorCalibrationMarkers(Transform root, Vector3 leftAimTarget, Vector3 rightAimTarget)
@@ -427,8 +432,8 @@ namespace LaunchRamp.Editor
             Transform markers = Group("MirrorCalibrationMarkers", root);
             Transform truck = root.Find("Truck");
             Transform trailer = root.Find("Trailer");
-            float truckRearZ = -TruckSize.z * .5f;
-            float trailerRearZ = TrailerColliderCenter.z - TrailerSize.z * .5f;
+            float truckRearZ = -TruckOverallLength * .5f;
+            float trailerRearZ = TrailerBodyCenterZ - TrailerOverallLength * .5f;
             CalibrationMarker("TruckLeftRear", markers, truck.TransformPoint(new Vector3(-TruckHalfWidth, 0f, truckRearZ)), lineMaterial);
             CalibrationMarker("TruckRightRear", markers, truck.TransformPoint(new Vector3(TruckHalfWidth, 0f, truckRearZ)), lineMaterial);
             CalibrationMarker("TrailerLeftRear", markers, trailer.TransformPoint(new Vector3(-TruckHalfWidth, 0f, trailerRearZ)), hazardMaterial);
@@ -487,18 +492,17 @@ namespace LaunchRamp.Editor
             GameObject truck = Group("Truck", parent).gameObject;
             truck.transform.localPosition = new(0f, 1.1f, 3.5f);
             Rigidbody body = truck.AddComponent<Rigidbody>();
-            body.mass = TruckMass; body.centerOfMass = new(0f, -.35f, .15f);
+            body.mass = TruckMass; body.centerOfMass = new(0f, -.30f, .10f);
             body.interpolation = RigidbodyInterpolation.Interpolate;
             body.collisionDetectionMode = CollisionDetectionMode.Continuous;
             BoxCollider truckCollider = truck.AddComponent<BoxCollider>();
             truckCollider.size = TruckColliderSize;
             truckCollider.center = TruckColliderCenter;
-            SetMaterial(Primitive("Chassis", PrimitiveType.Cube, truck.transform, Vector3.zero, TruckSize, true), truckMaterial);
-            SetMaterial(Primitive("Cab", PrimitiveType.Cube, truck.transform, new(0f, 1.05f, 1.15f), new(2.05f, 1.3f, 1.8f), true), truckMaterial);
+            BuildPickupVisuals(truck.transform);
 
             Transform wheelGroup = Group("Wheels", truck.transform);
-            Vector3[] positions = { new(-1.05f, -.45f, 1.55f), new(1.05f, -.45f, 1.55f),
-                new(-1.05f, -.45f, -1.55f), new(1.05f, -.45f, -1.55f) };
+            Vector3[] positions = { new(-1.05f, -.45f, TruckFrontAxleZ), new(1.05f, -.45f, TruckFrontAxleZ),
+                new(-1.05f, -.45f, TruckRearAxleZ), new(1.05f, -.45f, TruckRearAxleZ) };
             var wheels = new PrototypeTruckController.WheelBinding[4];
             for (int i = 0; i < positions.Length; i++)
             {
@@ -507,7 +511,7 @@ namespace LaunchRamp.Editor
                 wheels[i] = new PrototypeTruckController.WheelBinding { Collider = TruckWheel(mount.gameObject),
                     Visual = WheelVisual(name + "Visual", truck.transform, positions[i]), Steers = i < 2, Drives = i >= 2 };
             }
-            Transform hitch = Group("HitchPoint", truck.transform); hitch.localPosition = new(0f, 0f, -2.65f);
+            Transform hitch = Group("HitchPoint", truck.transform); hitch.localPosition = new(0f, 0f, TruckHitchZ);
             SetMaterial(Primitive("HitchVisual", PrimitiveType.Sphere, hitch, Vector3.zero, new(.18f, .18f, .18f), true), hitchMaterial);
             Transform camera = Group("DriverCameraMount", truck.transform); camera.localPosition = DriverEyePosition;
             truck.AddComponent<VehicleInputReader>();
@@ -516,37 +520,69 @@ namespace LaunchRamp.Editor
             return body;
         }
 
+        private static void BuildPickupVisuals(Transform truck)
+        {
+            // Collider-free pickup silhouette. Open spaces between these pieces provide windshield,
+            // side-window, and rear-window sightlines while one simple BoxCollider handles physics.
+            VisualBox("LowerChassis", truck, new(0f, -.12f, 0f), TruckSize);
+            VisualBox("FrontBumper", truck, new(0f, .05f, 2.80f), new(2.18f, .28f, .10f));
+            VisualBox("RearBumper", truck, new(0f, .05f, -2.80f), new(2.18f, .28f, .10f));
+            VisualBox("Hood", truck, new(0f, .42f, 1.85f), new(2.08f, .72f, 2f));
+            VisualBox("Bed", truck, new(0f, .30f, -1.48f), new(2.12f, .68f, 1.65f));
+            Transform cab = Group("CabFrame", truck);
+            VisualBox("Roof", cab, new(0f, 1.82f, .18f), new(2.04f, .18f, 1.72f));
+            VisualBox("LeftLowerDoor", cab, new(-.98f, .48f, .18f), new(.16f, .72f, 1.72f));
+            VisualBox("RightLowerDoor", cab, new(.98f, .48f, .18f), new(.16f, .72f, 1.72f));
+            foreach (float x in new[] { -.98f, .98f })
+            {
+                VisualBox(x < 0f ? "LeftAPillar" : "RightAPillar", cab, new(x, 1.25f, 1.00f), new(.14f, 1.10f, .14f));
+                VisualBox(x < 0f ? "LeftBPillar" : "RightBPillar", cab, new(x, 1.25f, .12f), new(.12f, 1.10f, .12f));
+                VisualBox(x < 0f ? "LeftRearPillar" : "RightRearPillar", cab, new(x, 1.25f, -.68f), new(.14f, 1.10f, .14f));
+            }
+            VisualBox("RearCabLowerWall", cab, new(0f, .73f, -.68f), new(1.82f, .28f, .14f));
+            VisualBox("RearCabUpperRail", cab, new(0f, 1.72f, -.68f), new(1.82f, .16f, .14f));
+        }
+
+        private static void VisualBox(string name, Transform parent, Vector3 position, Vector3 scale) =>
+            SetMaterial(Primitive(name, PrimitiveType.Cube, parent, position, scale, true), truckMaterial);
+
         private static void BuildTrailer(Transform parent, Rigidbody truckBody, bool connectTrailer)
         {
             GameObject trailer = Group("Trailer", parent).gameObject;
             // Connected mode makes both local hitch anchors coincide exactly in world space.
             // Diagnostic mode keeps the trailer dynamic but moves it clear of the truck.
-            trailer.transform.localPosition = connectTrailer
-                ? new Vector3(0f, 1.1f, -1.8f)
-                : new Vector3(0f, 1.1f, -8f);
+            if (connectTrailer)
+            {
+                Vector3 hitchWorld = truckBody.transform.TransformPoint(new Vector3(0f, 0f, TruckHitchZ));
+                trailer.transform.position = hitchWorld - new Vector3(0f, 0f, TrailerHitchZ);
+            }
+            else trailer.transform.localPosition = new Vector3(0f, 1.1f, -11f);
             Rigidbody body = trailer.AddComponent<Rigidbody>();
-            body.mass = TrailerMass; body.centerOfMass = new(0f, -.25f, -.15f);
+            body.mass = TrailerMass; body.centerOfMass = new(0f, -.25f, -.20f);
             body.interpolation = RigidbodyInterpolation.Interpolate;
             body.collisionDetectionMode = CollisionDetectionMode.Continuous;
             BoxCollider trailerCollider = trailer.AddComponent<BoxCollider>();
             trailerCollider.size = TrailerColliderSize;
             trailerCollider.center = TrailerColliderCenter;
-            SetMaterial(Primitive("TrailerBody", PrimitiveType.Cube, trailer.transform, new(0f, 0f, -.5f), TrailerSize, true), trailerMaterial);
+            SetMaterial(Primitive("TrailerBody", PrimitiveType.Cube, trailer.transform,
+                new(0f, 0f, TrailerBodyCenterZ), TrailerSize, true), trailerMaterial);
 
             Transform wheelGroup = Group("Wheels", trailer.transform);
-            Vector3[] positions = { new(-1.12f, -.35f, -.75f), new(1.12f, -.35f, -.75f) };
+            Vector3[] positions = { new(-1.12f, -.35f, TrailerAxleZ), new(1.12f, -.35f, TrailerAxleZ) };
             Transform leftPoint = Group("LeftWheelPoint", wheelGroup); leftPoint.localPosition = positions[0];
             Transform rightPoint = Group("RightWheelPoint", wheelGroup); rightPoint.localPosition = positions[1];
             Transform leftVisual = WheelVisual("LeftWheelVisual", trailer.transform, positions[0]);
             Transform rightVisual = WheelVisual("RightWheelVisual", trailer.transform, positions[1]);
-            Transform hitch = Group("HitchPoint", trailer.transform); hitch.localPosition = new(0f, 0f, 2.65f);
-            SetMaterial(Primitive("TrailerTongue", PrimitiveType.Cube, trailer.transform, new(0f, .05f, 2.075f),
-                new(.35f, .18f, 1.15f), true), hitchMaterial);
+            Transform hitch = Group("HitchPoint", trailer.transform); hitch.localPosition = new(0f, 0f, TrailerHitchZ);
+            float trailerFrontZ = TrailerBodyCenterZ + TrailerOverallLength * .5f;
+            float tongueLength = TrailerHitchZ - trailerFrontZ;
+            SetMaterial(Primitive("TrailerTongue", PrimitiveType.Cube, trailer.transform,
+                new(0f, .05f, trailerFrontZ + tongueLength * .5f), new(.35f, .18f, tongueLength), true), hitchMaterial);
             if (connectTrailer)
             {
                 ConfigurableJoint joint = trailer.AddComponent<ConfigurableJoint>();
                 joint.connectedBody = truckBody; joint.autoConfigureConnectedAnchor = false;
-                joint.anchor = hitch.localPosition; joint.connectedAnchor = new(0f, 0f, -2.65f);
+                joint.anchor = hitch.localPosition; joint.connectedAnchor = new(0f, 0f, TruckHitchZ);
                 joint.axis = Vector3.right;
                 joint.secondaryAxis = Vector3.up;
                 joint.xMotion = joint.yMotion = joint.zMotion = ConfigurableJointMotion.Locked;
