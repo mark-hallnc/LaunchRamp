@@ -22,6 +22,8 @@ namespace LaunchRamp.Editor
         private const string RootName = "VehiclePrototype";
         private const string GroundName = "TestGround";
         private const string CourseName = "DiagnosticCourse";
+        // Standalone drivetrain isolation switch. Re-enable only after truck-only testing passes.
+        private const bool ConnectTrailer = false;
         private const float TruckMass = 2200f, TrailerMass = 1700f;
         private const float WheelRadius = .52f, WheelWidth = .34f, SuspensionDistance = .28f;
         private const float MotorTorque = 2100f, BrakeTorque = 3600f, ParkingBrakeTorque = 6500f;
@@ -44,10 +46,10 @@ namespace LaunchRamp.Editor
                 GameObject root = new(RootName);
                 SceneManager.MoveGameObjectToScene(root, scene);
                 Rigidbody truck = BuildTruck(root.transform);
-                BuildTrailer(root.transform, truck);
+                BuildTrailer(root.transform, truck, ConnectTrailer);
                 BuildCourse(root.transform);
                 BuildCameras(scene, root, truck.transform.Find("DriverCameraMount"));
-                root.AddComponent<VehiclePhysicsValidator>();
+                root.AddComponent<VehiclePhysicsValidator>().Configure(ConnectTrailer);
                 EnsureLight(scene);
                 EditorSceneManager.MarkSceneDirty(scene);
                 if (!EditorSceneManager.SaveScene(scene, ScenePath))
@@ -197,12 +199,14 @@ namespace LaunchRamp.Editor
             return body;
         }
 
-        private static void BuildTrailer(Transform parent, Rigidbody truckBody)
+        private static void BuildTrailer(Transform parent, Rigidbody truckBody, bool connectTrailer)
         {
             GameObject trailer = Group("Trailer", parent).gameObject;
-            // This position makes both empty hitch transforms coincide at world Z 0.85.
-            // The truck and trailer solid boxes still retain 0.4 m of longitudinal clearance.
-            trailer.transform.localPosition = new(0f, 1f, -1.8f);
+            // Connected mode makes both local hitch anchors coincide exactly in world space.
+            // Diagnostic mode keeps the trailer dynamic but moves it clear of the truck.
+            trailer.transform.localPosition = connectTrailer
+                ? new Vector3(0f, 1.1f, -1.8f)
+                : new Vector3(0f, 1.1f, -8f);
             Rigidbody body = trailer.AddComponent<Rigidbody>();
             body.mass = TrailerMass; body.centerOfMass = new(0f, -.25f, -.15f);
             body.interpolation = RigidbodyInterpolation.Interpolate;
@@ -223,16 +227,21 @@ namespace LaunchRamp.Editor
                     Visual = WheelVisual(name + "Visual", trailer.transform, positions[i]) };
             }
             Transform hitch = Group("HitchPoint", trailer.transform); hitch.localPosition = new(0f, 0f, 2.65f);
-            ConfigurableJoint joint = trailer.AddComponent<ConfigurableJoint>();
-            joint.connectedBody = truckBody; joint.autoConfigureConnectedAnchor = false;
-            joint.anchor = hitch.localPosition; joint.connectedAnchor = new(0f, 0f, -2.65f);
-            joint.xMotion = joint.yMotion = joint.zMotion = ConfigurableJointMotion.Locked;
-            joint.angularXMotion = joint.angularYMotion = joint.angularZMotion = ConfigurableJointMotion.Limited;
-            joint.lowAngularXLimit = new SoftJointLimit { limit = -20f };
-            joint.highAngularXLimit = new SoftJointLimit { limit = 20f };
-            joint.angularYLimit = new SoftJointLimit { limit = 35f };
-            joint.angularZLimit = new SoftJointLimit { limit = 10f };
-            joint.enableCollision = false;
+            if (connectTrailer)
+            {
+                ConfigurableJoint joint = trailer.AddComponent<ConfigurableJoint>();
+                joint.connectedBody = truckBody; joint.autoConfigureConnectedAnchor = false;
+                joint.anchor = hitch.localPosition; joint.connectedAnchor = new(0f, 0f, -2.65f);
+                joint.axis = Vector3.right;
+                joint.secondaryAxis = Vector3.up;
+                joint.xMotion = joint.yMotion = joint.zMotion = ConfigurableJointMotion.Locked;
+                joint.angularXMotion = joint.angularYMotion = joint.angularZMotion = ConfigurableJointMotion.Limited;
+                joint.lowAngularXLimit = new SoftJointLimit { limit = -20f };
+                joint.highAngularXLimit = new SoftJointLimit { limit = 20f };
+                joint.angularYLimit = new SoftJointLimit { limit = 35f };
+                joint.angularZLimit = new SoftJointLimit { limit = 10f };
+                joint.enableCollision = false;
+            }
             trailer.AddComponent<PrototypeTrailer>().Configure(wheels);
         }
 

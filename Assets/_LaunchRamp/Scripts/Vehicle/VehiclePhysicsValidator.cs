@@ -11,6 +11,9 @@ namespace LaunchRamp.Vehicle
     public sealed class VehiclePhysicsValidator : MonoBehaviour
     {
         [SerializeField] private bool validateOnStart = true;
+        [SerializeField] private bool expectTrailerConnection = true;
+
+        public void Configure(bool trailerShouldBeConnected) => expectTrailerConnection = trailerShouldBeConnected;
 
         private void Start()
         {
@@ -40,7 +43,7 @@ namespace LaunchRamp.Vehicle
             report.AppendLine($"Truck spawn: {truck.position:F3}; Trailer spawn: {trailer.position:F3}");
             AppendColliders(truck, report, issues);
             AppendColliders(trailer, report, issues);
-            AppendJoint(trailer, report, issues);
+            AppendJoint(trailer, report, issues, prototypeRoot.GetComponent<VehiclePhysicsValidator>()?.expectTrailerConnection ?? true);
             DetectSolidOverlaps(prototypeRoot, truck, trailer, report, issues);
 
             report.AppendLine(issues.Count == 0
@@ -82,12 +85,13 @@ namespace LaunchRamp.Vehicle
                     issues.Add($"Unexpected Rigidbody on visual child '{Path(rigidbody.transform)}'.");
         }
 
-        private static void AppendJoint(Transform trailer, StringBuilder report, List<string> issues)
+        private static void AppendJoint(Transform trailer, StringBuilder report, List<string> issues, bool expectConnection)
         {
             ConfigurableJoint joint = trailer.GetComponent<ConfigurableJoint>();
             if (joint == null)
             {
-                issues.Add("Trailer hitch joint is missing.");
+                if (expectConnection) issues.Add("Trailer hitch joint is missing.");
+                else report.AppendLine("Trailer hitch: intentionally disconnected for standalone truck diagnosis.");
                 return;
             }
 

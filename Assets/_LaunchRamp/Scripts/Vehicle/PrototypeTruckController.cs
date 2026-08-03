@@ -62,15 +62,21 @@ namespace LaunchRamp.Vehicle
                 message.Append($"[Launch Ramp] Drivetrain: throttle={drive:F2}, brake={brake:F2}, ")
                     .Append($"reverse={drive < 0f && !changingDirection}, parkingBrake={_input.ParkingBrake}, ")
                     .Append($"speed={speed:F2} m/s ({ForwardSpeedMilesPerHour:F1} mph), ")
-                    .AppendLine($"velocityMagnitude={_body.linearVelocity.magnitude:F2} m/s");
+                    .AppendLine($"linearVelocity={_body.linearVelocity:F3}, angularVelocity={_body.angularVelocity:F3}")
+                    .AppendLine($" constraints={_body.constraints}, isSleeping={_body.IsSleeping()}, " +
+                                $"truckForward={transform.forward:F3}");
                 for (int i = 0; i < wheels.Length; i++)
                 {
                     WheelBinding wheel = wheels[i];
                     if (wheel.Collider == null) { message.AppendLine($" wheel[{i}]=UNASSIGNED"); continue; }
+                    bool hasHit = wheel.Collider.GetGroundHit(out WheelHit hit);
                     message.AppendLine($" wheel[{i}] {wheel.Collider.name}: driven={wheel.Drives}, " +
                                        $"motorTorque={wheel.Collider.motorTorque:F1} Nm, " +
                                        $"brakeTorque={wheel.Collider.brakeTorque:F1} Nm, " +
-                                       $"isGrounded={wheel.Collider.isGrounded}");
+                                       $"rpm={wheel.Collider.rpm:F1}, isGrounded={wheel.Collider.isGrounded}, " +
+                                       $"forwardSlip={(hasHit ? hit.forwardSlip : 0f):F3}, " +
+                                       $"sidewaysSlip={(hasHit ? hit.sidewaysSlip : 0f):F3}, " +
+                                       $"contactForce={(hasHit ? hit.force : 0f):F1} N");
                 }
                 Debug.Log(message.ToString(), this);
                 _nextDiagnosticLogTime = Time.unscaledTime + 1f;
