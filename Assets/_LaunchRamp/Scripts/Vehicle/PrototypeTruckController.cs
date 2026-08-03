@@ -26,6 +26,10 @@ namespace LaunchRamp.Vehicle
 
         private Rigidbody _body;
         private VehicleInputReader _input;
+        private float _nextDiagnosticLogTime;
+
+        public float ForwardSpeedMetersPerSecond { get; private set; }
+        public float ForwardSpeedMilesPerHour => ForwardSpeedMetersPerSecond * 2.2369363f;
 
         public void Configure(WheelBinding[] value, float torque, float brake, float handbrake, float steer, float reverseSpeed)
         {
@@ -39,6 +43,7 @@ namespace LaunchRamp.Vehicle
         {
             float drive = _input.Drive;
             float speed = Vector3.Dot(_body.linearVelocity, transform.forward);
+            ForwardSpeedMetersPerSecond = speed;
             bool changingDirection = Mathf.Abs(speed) > reverseEngagementSpeed && Mathf.Sign(drive) != Mathf.Sign(speed);
             foreach (WheelBinding wheel in wheels)
             {
@@ -47,6 +52,15 @@ namespace LaunchRamp.Vehicle
                 wheel.Collider.motorTorque = wheel.Drives && !changingDirection ? drive * motorTorque : 0f;
                 wheel.Collider.brakeTorque = _input.ParkingBrake ? parkingBrakeTorque :
                     changingDirection ? serviceBrakeTorque * Mathf.Abs(drive) : 0f;
+            }
+
+            if (Mathf.Abs(speed) >= .25f && Time.unscaledTime >= _nextDiagnosticLogTime)
+            {
+                float brake = changingDirection ? Mathf.Abs(drive) : 0f;
+                Debug.Log($"[Launch Ramp] Speed {speed:F2} m/s ({ForwardSpeedMilesPerHour:F1} mph), " +
+                          $"throttle={drive:F2}, brake={brake:F2}, steering={_input.Steering:F2}, " +
+                          $"parkingBrake={_input.ParkingBrake}", this);
+                _nextDiagnosticLogTime = Time.unscaledTime + 1f;
             }
         }
 

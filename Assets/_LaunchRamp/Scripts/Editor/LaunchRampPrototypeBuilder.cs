@@ -2,6 +2,7 @@
 using System;
 using System.IO;
 using LaunchRamp.Input;
+using LaunchRamp.Camera;
 using LaunchRamp.Trailer;
 using LaunchRamp.Vehicle;
 using UnityEditor;
@@ -20,6 +21,7 @@ namespace LaunchRamp.Editor
         private const string ScenePath = "Assets/_LaunchRamp/Scenes/Testing/VehiclePhysicsTest.unity";
         private const string RootName = "VehiclePrototype";
         private const string GroundName = "TestGround";
+        private const string CourseName = "DiagnosticCourse";
         private const float TruckMass = 3200f, TrailerMass = 1700f;
         private const float WheelRadius = .52f, WheelWidth = .34f, SuspensionDistance = .28f;
         private const float MotorTorque = 2100f, BrakeTorque = 3600f, ParkingBrakeTorque = 6500f;
@@ -43,6 +45,8 @@ namespace LaunchRamp.Editor
                 SceneManager.MoveGameObjectToScene(root, scene);
                 Rigidbody truck = BuildTruck(root.transform);
                 BuildTrailer(root.transform, truck);
+                BuildCourse(root.transform);
+                BuildCameras(scene, root, truck.transform.Find("DriverCameraMount"));
                 root.AddComponent<VehiclePhysicsValidator>();
                 EnsureLight(scene);
                 EditorSceneManager.MarkSceneDirty(scene);
@@ -87,9 +91,75 @@ namespace LaunchRamp.Editor
 
         private static void EnsureGround(Scene scene)
         {
-            foreach (GameObject root in scene.GetRootGameObjects()) if (root.name == GroundName) return;
-            GameObject ground = Primitive(GroundName, PrimitiveType.Cube, null, new(0f, -.25f, 0f), new(80f, .5f, 80f), false);
+            foreach (GameObject root in scene.GetRootGameObjects())
+            {
+                if (root.name != GroundName) continue;
+                root.transform.SetPositionAndRotation(new Vector3(0f, -.25f, 45f), Quaternion.identity);
+                root.transform.localScale = new Vector3(80f, .5f, 140f);
+                return;
+            }
+            GameObject ground = Primitive(GroundName, PrimitiveType.Cube, null, new(0f, -.25f, 45f), new(80f, .5f, 140f), false);
             SceneManager.MoveGameObjectToScene(ground, scene);
+        }
+
+        private static void BuildCourse(Transform parent)
+        {
+            // Raised, collider-free strips make distance traveled obvious without affecting physics.
+            Transform course = Group(CourseName, parent);
+            Primitive("CenterLine_0_to_105m", PrimitiveType.Cube, course, new(0f, .012f, 52.5f),
+                new(.08f, .02f, 105f), true);
+
+            for (int distance = 0; distance <= 100; distance += 10)
+                Primitive($"DistanceLine_{distance}m", PrimitiveType.Cube, course, new(0f, .014f, distance),
+                    new(8f, .025f, .08f), true);
+
+            for (int distance = 0; distance <= 50; distance += 10)
+            {
+                GameObject marker = Primitive($"Marker_{distance}m", PrimitiveType.Cube, course,
+                    new(5f, .5f, distance), new(.5f, 1f, .5f), true);
+                marker.transform.rotation = Quaternion.identity;
+            }
+
+            Vector3[] conePositions =
+            {
+                new(-4f, .35f, 12f), new(4f, .35f, 18f), new(-4f, .35f, 27f),
+                new(4f, .35f, 34f), new(-4f, .35f, 43f), new(4f, .35f, 50f)
+            };
+            for (int i = 0; i < conePositions.Length; i++)
+                Primitive($"RouteCube_{i + 1}", PrimitiveType.Cube, course, conePositions[i], new(.45f, .7f, .45f), true);
+        }
+
+        private static void BuildCameras(Scene scene, GameObject root, Transform driverMount)
+        {
+            // The template camera is replaced so reruns always leave exactly two known cameras.
+            foreach (GameObject sceneRoot in scene.GetRootGameObjects())
+                foreach (UnityEngine.Camera camera in sceneRoot.GetComponentsInChildren<UnityEngine.Camera>(true))
+                    UnityEngine.Object.DestroyImmediate(camera.gameObject);
+
+            if (driverMount == null) throw new InvalidOperationException("DriverCameraMount was not created.");
+            UnityEngine.Camera driver = CreateCamera("Driver Camera", driverMount, Vector3.zero, Quaternion.identity);
+            driver.fieldOfView = 65f;
+
+            Transform diagnosticTransform = Group("DiagnosticCamera", root.transform);
+            diagnosticTransform.position = new Vector3(18f, 28f, -18f);
+            diagnosticTransform.rotation = Quaternion.LookRotation(new Vector3(0f, 0f, 32f) - diagnosticTransform.position);
+            UnityEngine.Camera diagnostic = diagnosticTransform.gameObject.AddComponent<UnityEngine.Camera>();
+            diagnostic.fieldOfView = 60f;
+            diagnostic.farClipPlane = 180f;
+            diagnosticTransform.gameObject.AddComponent<AudioListener>();
+
+            root.AddComponent<PrototypeCameraSwitcher>().Configure(driver, diagnostic);
+        }
+
+        private static UnityEngine.Camera CreateCamera(string name, Transform parent, Vector3 localPosition,
+            Quaternion localRotation)
+        {
+            Transform cameraTransform = Group(name, parent);
+            cameraTransform.localPosition = localPosition;
+            cameraTransform.localRotation = localRotation;
+            UnityEngine.Camera camera = cameraTransform.gameObject.AddComponent<UnityEngine.Camera>();
+            cameraTransform.gameObject.AddComponent<AudioListener>();
+            return camera;
         }
 
         private static Rigidbody BuildTruck(Transform parent)
