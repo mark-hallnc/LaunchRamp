@@ -21,6 +21,9 @@ namespace LaunchRamp.Trailer
         private WheelState _leftState, _rightState;
         private float _leftRotation, _rightRotation, _nextLogTime;
 
+        public bool LeftGrounded => _leftState.Grounded;
+        public bool RightGrounded => _rightState.Grounded;
+
         private struct WheelState
         {
             public bool Grounded;

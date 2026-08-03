@@ -8,28 +8,39 @@ namespace LaunchRamp.Camera
     {
         [SerializeField] private UnityEngine.Camera driverCamera;
         [SerializeField] private UnityEngine.Camera diagnosticCamera;
+        [SerializeField] private UnityEngine.Camera exteriorCamera;
         [SerializeField] private Transform diagnosticTarget;
+        [SerializeField] private Transform exteriorTarget;
         [SerializeField, Range(10f, 100f)] private float orbitDistance = 60f;
         [SerializeField] private float orbitSensitivity = .15f;
         [SerializeField] private float zoomSensitivity = .02f;
         [SerializeField] private float driverLookSensitivity = .12f;
+        [SerializeField] private bool returnDriverViewToForward;
+        [SerializeField] private float driverReturnSpeed = 45f;
+        [SerializeField] private Vector3 exteriorOffset = new(0f, 6f, -10f);
 
         private InputAction _switchCamera;
         private InputAction _look;
         private InputAction _zoom;
         private InputAction _orbitButton;
-        private bool _usingDiagnosticCamera = true;
+        private InputAction _exteriorToggle;
+        private bool _usingDiagnosticCamera;
+        private bool _usingExteriorCamera;
+        private bool _previousDiagnosticState;
         private float _orbitYaw;
         private float _orbitPitch = 25f;
         private float _driverYaw;
         private float _driverPitch;
         private Quaternion _driverBaseRotation;
 
-        public void Configure(UnityEngine.Camera driver, UnityEngine.Camera diagnostic, Transform target)
+        public void Configure(UnityEngine.Camera driver, UnityEngine.Camera diagnostic,
+            UnityEngine.Camera exterior, Transform diagnosticLookTarget, Transform followTarget)
         {
             driverCamera = driver;
             diagnosticCamera = diagnostic;
-            diagnosticTarget = target;
+            exteriorCamera = exterior;
+            diagnosticTarget = diagnosticLookTarget;
+            exteriorTarget = followTarget;
             InitializeCameraAngles();
             ApplyCameraState();
         }
@@ -41,6 +52,7 @@ namespace LaunchRamp.Camera
             _look = new InputAction("Camera Look", InputActionType.Value, "<Mouse>/delta");
             _zoom = new InputAction("Diagnostic Zoom", InputActionType.Value, "<Mouse>/scroll");
             _orbitButton = new InputAction("Camera Look Button", InputActionType.Button, "<Mouse>/rightButton");
+            _exteriorToggle = new InputAction("Exterior Camera", InputActionType.Button, "<Keyboard>/v");
             InitializeCameraAngles();
             ApplyCameraState();
         }
@@ -51,16 +63,20 @@ namespace LaunchRamp.Camera
             _look?.Enable();
             _zoom?.Enable();
             _orbitButton?.Enable();
+            _exteriorToggle?.Enable();
             if (_switchCamera != null) _switchCamera.performed += OnSwitchCamera;
+            if (_exteriorToggle != null) _exteriorToggle.performed += OnExteriorToggle;
         }
 
         private void OnDisable()
         {
             if (_switchCamera != null) _switchCamera.performed -= OnSwitchCamera;
+            if (_exteriorToggle != null) _exteriorToggle.performed -= OnExteriorToggle;
             _switchCamera?.Disable();
             _look?.Disable();
             _zoom?.Disable();
             _orbitButton?.Disable();
+            _exteriorToggle?.Disable();
         }
 
         private void OnDestroy()
@@ -69,12 +85,17 @@ namespace LaunchRamp.Camera
             _look?.Dispose();
             _zoom?.Dispose();
             _orbitButton?.Dispose();
+            _exteriorToggle?.Dispose();
         }
 
         private void Update()
         {
             Vector2 look = _look?.ReadValue<Vector2>() ?? Vector2.zero;
-            if (_usingDiagnosticCamera)
+            if (_usingExteriorCamera)
+            {
+                UpdateExteriorCamera();
+            }
+            else if (_usingDiagnosticCamera)
             {
                 Vector2 scroll = _zoom?.ReadValue<Vector2>() ?? Vector2.zero;
                 orbitDistance = Mathf.Clamp(orbitDistance - scroll.y * zoomSensitivity, 10f, 100f);
@@ -87,22 +108,49 @@ namespace LaunchRamp.Camera
             }
             else if (_orbitButton?.IsPressed() == true && driverCamera != null)
             {
-                _driverYaw = Mathf.Clamp(_driverYaw + look.x * driverLookSensitivity, -70f, 70f);
-                _driverPitch = Mathf.Clamp(_driverPitch - look.y * driverLookSensitivity, -35f, 35f);
+                _driverYaw = Mathf.Clamp(_driverYaw + look.x * driverLookSensitivity, -85f, 85f);
+                _driverPitch = Mathf.Clamp(_driverPitch - look.y * driverLookSensitivity, -35f, 45f);
+                driverCamera.transform.localRotation = _driverBaseRotation * Quaternion.Euler(_driverPitch, _driverYaw, 0f);
+            }
+            else if (returnDriverViewToForward && driverCamera != null)
+            {
+                _driverYaw = Mathf.MoveTowards(_driverYaw, 0f, driverReturnSpeed * Time.deltaTime);
+                _driverPitch = Mathf.MoveTowards(_driverPitch, 0f, driverReturnSpeed * Time.deltaTime);
                 driverCamera.transform.localRotation = _driverBaseRotation * Quaternion.Euler(_driverPitch, _driverYaw, 0f);
             }
         }
 
         private void OnSwitchCamera(InputAction.CallbackContext context)
         {
+            _usingExteriorCamera = false;
             _usingDiagnosticCamera = !_usingDiagnosticCamera;
+            ApplyCameraState();
+        }
+
+        private void OnExteriorToggle(InputAction.CallbackContext context)
+        {
+            if (!_usingExteriorCamera) _previousDiagnosticState = _usingDiagnosticCamera;
+            _usingExteriorCamera = !_usingExteriorCamera;
+            if (!_usingExteriorCamera) _usingDiagnosticCamera = _previousDiagnosticState;
             ApplyCameraState();
         }
 
         private void ApplyCameraState()
         {
-            SetCameraActive(driverCamera, !_usingDiagnosticCamera);
-            SetCameraActive(diagnosticCamera, _usingDiagnosticCamera);
+            SetCameraActive(driverCamera, !_usingExteriorCamera && !_usingDiagnosticCamera);
+            SetCameraActive(diagnosticCamera, !_usingExteriorCamera && _usingDiagnosticCamera);
+            SetCameraActive(exteriorCamera, _usingExteriorCamera);
+        }
+
+        private void UpdateExteriorCamera()
+        {
+            if (exteriorCamera == null || exteriorTarget == null) return;
+            Vector3 desiredPosition = exteriorTarget.TransformPoint(exteriorOffset);
+            exteriorCamera.transform.position = Vector3.Lerp(exteriorCamera.transform.position,
+                desiredPosition, 1f - Mathf.Exp(-6f * Time.deltaTime));
+            Vector3 lookPoint = exteriorTarget.position + exteriorTarget.up * 1f;
+            exteriorCamera.transform.rotation = Quaternion.LookRotation(lookPoint - exteriorCamera.transform.position,
+                Vector3.up);
         }
 
         private void InitializeCameraAngles()

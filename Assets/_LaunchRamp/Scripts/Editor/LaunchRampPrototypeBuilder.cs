@@ -4,11 +4,15 @@ using System.IO;
 using LaunchRamp.Input;
 using LaunchRamp.Camera;
 using LaunchRamp.Trailer;
+using LaunchRamp.UI;
 using LaunchRamp.Vehicle;
+using TMPro;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+using UnityEngine.Rendering.Universal;
 
 namespace LaunchRamp.Editor
 {
@@ -28,6 +32,12 @@ namespace LaunchRamp.Editor
         private const float TruckSuspensionSpring = 38000f, TruckSuspensionDamper = 5200f;
         private const float TrailerSuspensionSpring = 40000f, TrailerSuspensionDamper = 6000f;
         private const float TrailerLateralGrip = 6000f, TrailerRollingResistance = 100f;
+        private const string LeftMirrorTexturePath = "Assets/_LaunchRamp/Materials/LeftMirrorRenderTexture.renderTexture";
+        private const string RightMirrorTexturePath = "Assets/_LaunchRamp/Materials/RightMirrorRenderTexture.renderTexture";
+        private const string LeftMirrorMaterialPath = "Assets/_LaunchRamp/Materials/LeftMirrorPrototype.mat";
+        private const string RightMirrorMaterialPath = "Assets/_LaunchRamp/Materials/RightMirrorPrototype.mat";
+        private static readonly Vector3 LeftMirrorCameraEuler = new(0f, 165f, 0f);
+        private static readonly Vector3 RightMirrorCameraEuler = new(0f, 195f, 0f);
         private const float MotorTorque = 2100f, BrakeTorque = 3600f, ParkingBrakeTorque = 6500f;
         private const float SteerAngle = 30f, ReverseEngagementSpeed = 1.5f;
         private static readonly Vector3 TruckSize = new(2.2f, 1f, 4.8f);
@@ -72,6 +82,7 @@ namespace LaunchRamp.Editor
                         trailerHitch);
                 BuildCourse(root.transform);
                 BuildCameras(scene, root, truck.transform.Find("DriverCameraMount"));
+                BuildHandlingPanel(root, truck, trailer, truckHitch, trailerHitch);
                 root.AddComponent<VehiclePhysicsValidator>().Configure(connectTrailer);
                 EnsureLight(scene);
                 EditorSceneManager.MarkSceneDirty(scene);
@@ -123,40 +134,40 @@ namespace LaunchRamp.Editor
                 if (root.name != GroundName) continue;
                 UnityEngine.Object.DestroyImmediate(root);
             }
-            GameObject ground = Primitive(GroundName, PrimitiveType.Cube, null, new(0f, -.25f, 45f), new(80f, .5f, 140f), false);
+            GameObject ground = Primitive(GroundName, PrimitiveType.Cube, null, new(0f, -.25f, 25f), new(100f, .5f, 180f), false);
             SceneManager.MoveGameObjectToScene(ground, scene);
         }
 
         private static void BuildCourse(Transform parent)
         {
-            // Raised, collider-free strips make distance traveled obvious without affecting physics.
+            // Collider-free backing course: 8 m approach, 3.5 m backing lane, target box, and curved option.
             Transform course = Group(CourseName, parent);
-            Primitive("CenterLine_0_to_105m", PrimitiveType.Cube, course, new(0f, .012f, 52.5f),
-                new(.08f, .02f, 105f), true);
+            Primitive("ApproachCenterLine", PrimitiveType.Cube, course, new(0f, .012f, 40f), new(.08f, .02f, 80f), true);
+            Primitive("BackingLaneLeftLine", PrimitiveType.Cube, course, new(-1.75f, .014f, -22.5f), new(.08f, .025f, 45f), true);
+            Primitive("BackingLaneRightLine", PrimitiveType.Cube, course, new(1.75f, .014f, -22.5f), new(.08f, .025f, 45f), true);
+            Primitive("TargetBack", PrimitiveType.Cube, course, new(0f, .016f, -45f), new(3.5f, .03f, .1f), true);
+            Primitive("TargetFront", PrimitiveType.Cube, course, new(0f, .016f, -33f), new(3.5f, .03f, .1f), true);
+            Primitive("TargetLeft", PrimitiveType.Cube, course, new(-1.75f, .016f, -39f), new(.1f, .03f, 12f), true);
+            Primitive("TargetRight", PrimitiveType.Cube, course, new(1.75f, .016f, -39f), new(.1f, .03f, 12f), true);
 
-            for (int distance = 0; distance <= 100; distance += 10)
-                Primitive($"DistanceLine_{distance}m", PrimitiveType.Cube, course, new(0f, .014f, distance),
-                    new(8f, .025f, .08f), true);
-
-            for (int distance = 0; distance <= 50; distance += 10)
+            for (int i = 0; i <= 9; i++)
             {
-                GameObject marker = Primitive($"Marker_{distance}m", PrimitiveType.Cube, course,
-                    new(5f, .5f, distance), new(.5f, 1f, .5f), true);
-                marker.transform.rotation = Quaternion.identity;
+                float z = -4f - i * 4.5f;
+                Primitive($"BackingPostLeft_{i}", PrimitiveType.Cylinder, course, new(-2.15f, .4f, z), new(.18f, .4f, .18f), true);
+                Primitive($"BackingPostRight_{i}", PrimitiveType.Cylinder, course, new(2.15f, .4f, z), new(.18f, .4f, .18f), true);
             }
 
-            Vector3[] conePositions =
+            for (int i = 0; i <= 10; i++)
             {
-                new(-4f, .35f, 12f), new(4f, .35f, 18f), new(-4f, .35f, 27f),
-                new(4f, .35f, 34f), new(-4f, .35f, 43f), new(4f, .35f, 50f)
-            };
-            for (int i = 0; i < conePositions.Length; i++)
-                Primitive($"RouteCube_{i + 1}", PrimitiveType.Cube, course, conePositions[i], new(.45f, .7f, .45f), true);
+                float angle = Mathf.Lerp(10f, 80f, i / 10f) * Mathf.Deg2Rad;
+                Vector3 point = new(10f - Mathf.Cos(angle) * 10f, .35f, 2f + Mathf.Sin(angle) * 10f);
+                Primitive($"CurvedApproachPost_{i}", PrimitiveType.Cube, course, point, new(.35f, .7f, .35f), true);
+            }
         }
 
         private static void BuildCameras(Scene scene, GameObject root, Transform driverMount)
         {
-            // The template camera is replaced so reruns always leave exactly two known cameras.
+            // Replace prior player and mirror cameras; the prototype root is also recreated each run.
             foreach (GameObject sceneRoot in scene.GetRootGameObjects())
                 foreach (UnityEngine.Camera camera in sceneRoot.GetComponentsInChildren<UnityEngine.Camera>(true))
                     UnityEngine.Object.DestroyImmediate(camera.gameObject);
@@ -175,7 +186,112 @@ namespace LaunchRamp.Editor
             diagnostic.farClipPlane = 180f;
             diagnosticTransform.gameObject.AddComponent<AudioListener>();
 
-            root.AddComponent<PrototypeCameraSwitcher>().Configure(driver, diagnostic, target);
+            Transform exteriorTransform = Group("ExteriorFollowCamera", root.transform);
+            exteriorTransform.position = root.transform.Find("Truck").TransformPoint(new Vector3(0f, 6f, -10f));
+            UnityEngine.Camera exterior = exteriorTransform.gameObject.AddComponent<UnityEngine.Camera>();
+            exterior.fieldOfView = 60f;
+            exterior.farClipPlane = 180f;
+            exteriorTransform.gameObject.AddComponent<AudioListener>();
+
+            BuildMirrors(root.transform.Find("Truck"));
+            root.AddComponent<PrototypeCameraSwitcher>().Configure(driver, diagnostic, exterior, target,
+                root.transform.Find("Truck"));
+        }
+
+        private static void BuildMirrors(Transform truck)
+        {
+            if (truck == null) throw new InvalidOperationException("Truck was not available for mirror creation.");
+            RenderTexture leftTexture = EnsureRenderTexture(LeftMirrorTexturePath);
+            RenderTexture rightTexture = EnsureRenderTexture(RightMirrorTexturePath);
+            Material leftMaterial = EnsureMirrorMaterial(LeftMirrorMaterialPath, leftTexture);
+            Material rightMaterial = EnsureMirrorMaterial(RightMirrorMaterialPath, rightTexture);
+
+            CreateMirrorCamera("LeftMirrorCamera", truck, new Vector3(-1.12f, 1.4f, 1.2f),
+                LeftMirrorCameraEuler, leftTexture);
+            CreateMirrorCamera("RightMirrorCamera", truck, new Vector3(1.12f, 1.4f, 1.2f),
+                RightMirrorCameraEuler, rightTexture);
+            CreateMirrorPlane("LeftMirror", truck, new Vector3(-1.08f, 1.4f, 1.35f),
+                new Vector3(.5f, .26f, .035f), leftMaterial);
+            CreateMirrorPlane("RightMirror", truck, new Vector3(1.08f, 1.4f, 1.35f),
+                new Vector3(.5f, .26f, .035f), rightMaterial);
+        }
+
+        private static void CreateMirrorCamera(string name, Transform parent, Vector3 position,
+            Vector3 euler, RenderTexture texture)
+        {
+            Transform value = Group(name, parent);
+            value.localPosition = position;
+            value.localRotation = Quaternion.Euler(euler);
+            UnityEngine.Camera camera = value.gameObject.AddComponent<UnityEngine.Camera>();
+            camera.targetTexture = texture;
+            camera.fieldOfView = 45f;
+            camera.nearClipPlane = .1f;
+            camera.farClipPlane = 120f;
+            UniversalAdditionalCameraData data = value.gameObject.AddComponent<UniversalAdditionalCameraData>();
+            data.renderShadows = false;
+        }
+
+        private static void CreateMirrorPlane(string name, Transform parent, Vector3 position,
+            Vector3 scale, Material material)
+        {
+            GameObject mirror = Primitive(name, PrimitiveType.Cube, parent, position, scale, true);
+            mirror.GetComponent<Renderer>().sharedMaterial = material;
+        }
+
+        private static RenderTexture EnsureRenderTexture(string path)
+        {
+            RenderTexture texture = AssetDatabase.LoadAssetAtPath<RenderTexture>(path);
+            if (texture != null) return texture;
+            texture = new RenderTexture(512, 256, 16) { name = Path.GetFileNameWithoutExtension(path) };
+            AssetDatabase.CreateAsset(texture, path);
+            return texture;
+        }
+
+        private static Material EnsureMirrorMaterial(string path, RenderTexture texture)
+        {
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (material == null)
+            {
+                Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+                if (shader == null) shader = Shader.Find("Unlit/Texture");
+                material = new Material(shader) { name = Path.GetFileNameWithoutExtension(path) };
+                AssetDatabase.CreateAsset(material, path);
+            }
+            material.mainTexture = texture;
+            EditorUtility.SetDirty(material);
+            return material;
+        }
+
+        private static void BuildHandlingPanel(GameObject root, Rigidbody truck, Rigidbody trailer,
+            Transform truckHitch, Transform trailerHitch)
+        {
+            GameObject canvasObject = new("PrototypeDebugCanvas", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            canvasObject.transform.SetParent(root.transform, false);
+            Canvas canvas = canvasObject.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1920f, 1080f);
+
+            GameObject panel = new("HandlingDebugPanel", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
+            panel.transform.SetParent(canvasObject.transform, false);
+            RectTransform panelRect = panel.GetComponent<RectTransform>();
+            panelRect.anchorMin = panelRect.anchorMax = panelRect.pivot = new Vector2(0f, 1f);
+            panelRect.anchoredPosition = new Vector2(18f, -18f);
+            panelRect.sizeDelta = new Vector2(390f, 235f);
+            panel.GetComponent<Image>().color = new Color(0f, 0f, 0f, .68f);
+
+            GameObject textObject = new("Telemetry", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
+            textObject.transform.SetParent(panel.transform, false);
+            RectTransform textRect = textObject.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero; textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(14f, 10f); textRect.offsetMax = new Vector2(-14f, -10f);
+            TextMeshProUGUI text = textObject.GetComponent<TextMeshProUGUI>();
+            text.fontSize = 18f; text.color = Color.white; text.alignment = TextAlignmentOptions.TopLeft;
+
+            root.AddComponent<PrototypeHandlingDebugPanel>().Configure(panel, text,
+                truck.GetComponent<PrototypeTruckController>(), truck.GetComponent<VehicleInputReader>(),
+                truck, trailer, truckHitch, trailerHitch, trailer.GetComponent<PassiveTrailerAxle>());
         }
 
         private static UnityEngine.Camera CreateCamera(string name, Transform parent, Vector3 localPosition,
@@ -215,7 +331,7 @@ namespace LaunchRamp.Editor
                     Visual = WheelVisual(name + "Visual", truck.transform, positions[i]), Steers = i < 2, Drives = i >= 2 };
             }
             Transform hitch = Group("HitchPoint", truck.transform); hitch.localPosition = new(0f, 0f, -2.65f);
-            Transform camera = Group("DriverCameraMount", truck.transform); camera.localPosition = new(0f, 1.65f, .8f);
+            Transform camera = Group("DriverCameraMount", truck.transform); camera.localPosition = new(-.52f, 1.55f, 1.1f);
             truck.AddComponent<VehicleInputReader>();
             truck.AddComponent<PrototypeTruckController>().Configure(wheels, MotorTorque, BrakeTorque,
                 ParkingBrakeTorque, SteerAngle, ReverseEngagementSpeed);

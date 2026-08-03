@@ -14,7 +14,7 @@ namespace LaunchRamp.Trailer
         [SerializeField] private Transform trailerHitch;
         [SerializeField] private BoxCollider trailerBodyCollider;
         [SerializeField] private Collider groundCollider;
-        [SerializeField] private bool logWhileThrottleHeld = true;
+        [SerializeField] private bool logWhileThrottleHeld;
         [SerializeField, Min(.01f)] private float separationErrorDistance = .08f;
         [SerializeField, Min(1f)] private float excessiveTrailerAngularSpeed = 6f;
 

@@ -25,13 +25,22 @@ namespace LaunchRamp.Vehicle
         [SerializeField, Range(0f, 45f)] private float maximumSteerAngle = 30f;
         [SerializeField, Min(0f)] private float reverseEngagementSpeed = 1.5f;
         [SerializeField] private bool enableDetailedDrivetrainDiagnostics;
+        [SerializeField, Min(1f)] private float maximumSpeedMetersPerSecond = 8.94f;
+        [SerializeField, Min(.1f)] private float throttleResponsePerSecond = 1.5f;
+        [SerializeField, Min(.1f)] private float steeringResponsePerSecond = 3f;
+        [SerializeField, Min(.1f)] private float steeringReturnPerSecond = 4f;
 
         private Rigidbody _body;
         private VehicleInputReader _input;
         private float _nextDiagnosticLogTime;
+        private float _smoothedDrive;
+        private float _smoothedSteering;
 
         public float ForwardSpeedMetersPerSecond { get; private set; }
         public float ForwardSpeedMilesPerHour => ForwardSpeedMetersPerSecond * 2.2369363f;
+        public float DriveInput => _smoothedDrive;
+        public float SteeringInput => _smoothedSteering;
+        public bool ParkingBrakeApplied => _input != null && _input.ParkingBrake;
 
         public void Configure(WheelBinding[] value, float torque, float brake, float handbrake, float steer, float reverseSpeed)
         {
@@ -43,15 +52,25 @@ namespace LaunchRamp.Vehicle
 
         private void FixedUpdate()
         {
-            float drive = _input.Drive;
+            float drive = Mathf.MoveTowards(_smoothedDrive, _input.Drive,
+                throttleResponsePerSecond * Time.fixedDeltaTime);
+            _smoothedDrive = drive;
+            float steeringRate = Mathf.Abs(_input.Steering) > .01f
+                ? steeringResponsePerSecond
+                : steeringReturnPerSecond;
+            _smoothedSteering = Mathf.MoveTowards(_smoothedSteering, _input.Steering,
+                steeringRate * Time.fixedDeltaTime);
             float speed = Vector3.Dot(_body.linearVelocity, transform.forward);
             ForwardSpeedMetersPerSecond = speed;
             bool changingDirection = Mathf.Abs(speed) > reverseEngagementSpeed && Mathf.Sign(drive) != Mathf.Sign(speed);
             foreach (WheelBinding wheel in wheels)
             {
                 if (wheel.Collider == null) continue;
-                wheel.Collider.steerAngle = wheel.Steers ? _input.Steering * maximumSteerAngle : 0f;
-                wheel.Collider.motorTorque = wheel.Drives && !changingDirection ? drive * motorTorque : 0f;
+                wheel.Collider.steerAngle = wheel.Steers ? _smoothedSteering * maximumSteerAngle : 0f;
+                bool acceleratingPastLimit = Mathf.Abs(speed) >= maximumSpeedMetersPerSecond &&
+                                             Mathf.Sign(drive) == Mathf.Sign(speed);
+                wheel.Collider.motorTorque = wheel.Drives && !changingDirection && !acceleratingPastLimit
+                    ? drive * motorTorque : 0f;
                 wheel.Collider.brakeTorque = _input.ParkingBrake ? parkingBrakeTorque :
                     changingDirection ? serviceBrakeTorque * Mathf.Abs(drive) : 0f;
             }
