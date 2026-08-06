@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using LaunchRamp.Input;
 using LaunchRamp.Camera;
+using LaunchRamp.Environment;
 using LaunchRamp.Trailer;
 using LaunchRamp.UI;
 using LaunchRamp.Vehicle;
@@ -23,6 +24,8 @@ namespace LaunchRamp.Editor
     public static class LaunchRampPrototypeBuilder
     {
         private const string ScenePath = "Assets/_LaunchRamp/Scenes/Testing/VehiclePhysicsTest.unity";
+        private const string BoatRampScenePath = "Assets/_LaunchRamp/Scenes/Testing/BoatRampGrayboxTest.unity";
+        private const string BoatRampEnvironmentName = "BoatRampGrayboxEnvironment";
         private const string RootName = "VehiclePrototype";
         private const string GroundName = "TestGround";
         private const string CourseName = "DiagnosticCourse";
@@ -67,6 +70,7 @@ namespace LaunchRamp.Editor
         private const float MinimumBodyClearance = .5f;
         private static Material truckMaterial, trailerMaterial, wheelMaterial, groundMaterial;
         private static Material lineMaterial, targetMaterial, hazardMaterial, hitchMaterial, mirrorHousingMaterial;
+        private static Material asphaltMaterial, concreteMaterial, waterMaterial, terrainMaterial, dockMaterial;
 
         [MenuItem("Launch Ramp/Build Vehicle Physics Prototype")]
         public static void Build() => BuildPrototype(ConnectTrailer);
@@ -74,11 +78,14 @@ namespace LaunchRamp.Editor
         [MenuItem("Launch Ramp/Build Truck-Only Physics Prototype")]
         public static void BuildTruckOnly() => BuildPrototype(false);
 
+        [MenuItem("Launch Ramp/Build Boat Ramp Graybox Test")]
+        public static void BuildBoatRamp() => BuildBoatRampPrototype();
+
         private static void BuildPrototype(bool connectTrailer)
         {
             try
             {
-                Scene scene = OpenTargetScene();
+                Scene scene = OpenTargetScene(ScenePath);
                 EnsurePrototypeMaterials();
                 ReplaceRoot(scene);
                 EnsureGround(scene);
@@ -117,6 +124,62 @@ namespace LaunchRamp.Editor
             catch (Exception e) { Debug.LogError($"[Launch Ramp] Prototype build failed: {e.Message}\n{e}"); }
         }
 
+        private static void BuildBoatRampPrototype()
+        {
+            try
+            {
+                Scene scene = OpenTargetScene(BoatRampScenePath);
+                EnsurePrototypeMaterials();
+                ReplaceNamedRoot(scene, RootName);
+                ReplaceNamedRoot(scene, BoatRampEnvironmentName);
+                Transform crestReference = BuildBoatRampEnvironment(scene);
+
+                GameObject root = new(RootName);
+                SceneManager.MoveGameObjectToScene(root, scene);
+                Quaternion entranceRotation = Quaternion.Euler(0f, 180f, 0f);
+                Rigidbody truck = BuildTruck(root.transform, new Vector3(0f, 6.1f, 76f), entranceRotation);
+                BuildTrailer(root.transform, truck, true);
+                Rigidbody trailer = root.transform.Find("Trailer").GetComponent<Rigidbody>();
+                Transform truckHitch = truck.transform.Find("HitchPoint");
+                Transform trailerHitch = trailer.transform.Find("HitchPoint");
+                ValidateBodyClearance(truck.GetComponent<BoxCollider>(), trailer.GetComponent<BoxCollider>());
+
+                VehicleRigReset reset = root.AddComponent<VehicleRigReset>();
+                reset.Configure(truck, trailer);
+                ComputeConnectedRigPose(new Vector3(-2.2f, 6.1f, 27f), entranceRotation,
+                    out Vector3 practiceTruck, out Quaternion practiceTruckRotation,
+                    out Vector3 practiceTrailer, out Quaternion practiceTrailerRotation);
+                reset.ConfigurePracticeSpawn(practiceTruck, practiceTruckRotation, practiceTrailer, practiceTrailerRotation);
+
+                root.AddComponent<TrailerRigDiagnostics>().Configure(truck, trailer, trailer.GetComponent<BoxCollider>(),
+                    FindEnvironmentGroundCollider(scene), trailer.GetComponent<ConfigurableJoint>(), truckHitch, trailerHitch);
+                BuildCameras(scene, root, truck.transform.Find("DriverCameraMount"),
+                    new Vector3(0f, 1.5f, 5f), new Vector3(38f, 32f, 48f));
+                BuildHandlingPanel(root, truck, trailer, truckHitch, trailerHitch);
+                BuildBoatRampSightLineDebug(root, truck.transform.Find("DriverCameraMount"), trailer.transform, crestReference);
+                root.AddComponent<VehiclePhysicsValidator>().Configure(true);
+                EnsureLight(scene);
+                AssetDatabase.SaveAssets();
+                EditorSceneManager.MarkSceneDirty(scene);
+                if (!EditorSceneManager.SaveScene(scene, BoatRampScenePath))
+                    throw new InvalidOperationException($"Unity could not save '{BoatRampScenePath}'.");
+                Selection.activeGameObject = root;
+                Debug.Log($"[Launch Ramp] Boat-ramp gray-box test built and saved: {BoatRampScenePath}", root);
+            }
+            catch (OperationCanceledException e) { Debug.LogWarning($"[Launch Ramp] Build cancelled: {e.Message}"); }
+            catch (Exception e) { Debug.LogError($"[Launch Ramp] Boat-ramp build failed: {e.Message}\n{e}"); }
+        }
+
+        private static void ComputeConnectedRigPose(Vector3 truckPosition, Quaternion truckRotation,
+            out Vector3 resultTruckPosition, out Quaternion resultTruckRotation,
+            out Vector3 resultTrailerPosition, out Quaternion resultTrailerRotation)
+        {
+            resultTruckPosition = truckPosition; resultTruckRotation = truckRotation;
+            resultTrailerRotation = truckRotation;
+            Vector3 hitchWorld = truckPosition + truckRotation * new Vector3(0f, 0f, TruckHitchZ);
+            resultTrailerPosition = hitchWorld - truckRotation * new Vector3(0f, 0f, TrailerHitchZ);
+        }
+
         [MenuItem("Launch Ramp/Validate Vehicle Physics Prototype")]
         public static void Validate()
         {
@@ -130,21 +193,71 @@ namespace LaunchRamp.Editor
             VehiclePhysicsValidator.Validate(root, true);
         }
 
-        private static Scene OpenTargetScene()
+        [MenuItem("Launch Ramp/Validate Boat Ramp Graybox Test")]
+        public static void ValidateBoatRamp()
+        {
+            GameObject environment = GameObject.Find(BoatRampEnvironmentName);
+            GameObject vehicle = GameObject.Find(RootName);
+            var issues = new System.Collections.Generic.List<string>();
+            if (environment == null) issues.Add($"Missing {BoatRampEnvironmentName} root.");
+            if (vehicle == null) issues.Add($"Missing {RootName} root.");
+            if (Mathf.Abs(9f - 4f * 2f - 1f) > .001f) issues.Add("Ramp lane-width configuration is invalid.");
+            if (Mathf.Abs((4.64f - .32f) / 36f - .12f) > .001f) issues.Add("Main ramp grade is not 12 percent.");
+            if (environment != null)
+            {
+                Transform water = environment.transform.Find("WaterPlane");
+                if (water == null || Mathf.Abs(water.GetComponent<Renderer>().bounds.max.y) > .01f)
+                    issues.Add("Water surface is missing or not at Y=0.");
+                foreach (string path in new[] { "EntranceAccessRoad", "UpperStagingPavement", "RampApproach",
+                             "TwoLaneLaunchRamp/MainRamp_12Percent", "ModularDock/DockWalkway" })
+                    if (environment.transform.Find(path)?.GetComponent<Collider>() == null)
+                        issues.Add($"Required ground collider is missing: {path}.");
+                if (environment.transform.Find("RampCrestReference") == null)
+                    issues.Add("Ramp crest sight-line reference is missing.");
+                Collider dock = environment.transform.Find("ModularDock/DockWalkway")?.GetComponent<Collider>();
+                if (dock != null && dock.bounds.min.x - 4.5f < .4f)
+                    issues.Add("Dock clearance from the 9 m ramp is below 0.4 m.");
+            }
+            if (vehicle != null)
+            {
+                VehiclePhysicsValidator.Validate(vehicle, true);
+                Transform truck = vehicle.transform.Find("Truck");
+                Transform trailer = vehicle.transform.Find("Trailer");
+                Transform truckHitch = truck?.Find("HitchPoint"); Transform trailerHitch = trailer?.Find("HitchPoint");
+                if (truckHitch == null || trailerHitch == null || Vector3.Distance(truckHitch.position, trailerHitch.position) > .01f)
+                    issues.Add("Truck/trailer hitch anchors are not coincident.");
+                foreach (string wheel in new[] { "Wheels/LeftWheelPoint", "Wheels/RightWheelPoint" })
+                {
+                    Transform point = trailer?.Find(wheel);
+                    if (point == null || !Physics.Raycast(point.position, -trailer.up, out _, WheelRadius + .3f,
+                            ~0, QueryTriggerInteraction.Ignore))
+                        issues.Add($"Passive trailer suspension point is not grounded: {wheel}.");
+                }
+            }
+            if (issues.Count == 0) Debug.Log("[Launch Ramp] Boat-ramp gray-box validation PASS.", environment);
+            else Debug.LogError($"[Launch Ramp] Boat-ramp validation failed:\n - {string.Join("\n - ", issues)}", environment);
+        }
+
+        private static Scene OpenTargetScene(string scenePath)
         {
             if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
                 throw new OperationCanceledException("the current modified scene was not saved.");
-            string directory = Path.GetDirectoryName(ScenePath)?.Replace('\\', '/');
+            string directory = Path.GetDirectoryName(scenePath)?.Replace('\\', '/');
             if (string.IsNullOrEmpty(directory)) throw new InvalidOperationException("Invalid target scene path.");
             Directory.CreateDirectory(directory);
-            return File.Exists(ScenePath) ? EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single) :
+            return File.Exists(scenePath) ? EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single) :
                 EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
         }
 
         private static void ReplaceRoot(Scene scene)
         {
+            ReplaceNamedRoot(scene, RootName);
+        }
+
+        private static void ReplaceNamedRoot(Scene scene, string rootName)
+        {
             foreach (GameObject root in scene.GetRootGameObjects())
-                if (root.name == RootName) UnityEngine.Object.DestroyImmediate(root);
+                if (root.name == rootName) UnityEngine.Object.DestroyImmediate(root);
         }
 
         private static void EnsureGround(Scene scene)
@@ -203,7 +316,167 @@ namespace LaunchRamp.Editor
         private static void CourseMark(string name, Transform parent, Vector3 position, Vector3 scale, Material material) =>
             SetMaterial(Primitive(name, PrimitiveType.Cube, parent, position, scale, true), material);
 
-        private static void BuildCameras(Scene scene, GameObject root, Transform driverMount)
+        private static Transform BuildBoatRampEnvironment(Scene scene)
+        {
+            GameObject environment = new(BoatRampEnvironmentName);
+            SceneManager.MoveGameObjectToScene(environment, scene);
+            Transform root = environment.transform;
+
+            Surface("EntranceAccessRoad", root, new(0f, 4.75f, 80f), new(10f, .5f, 30f), asphaltMaterial);
+            Surface("UpperStagingPavement", root, new(0f, 4.75f, 52.5f), new(68f, .5f, 25f), asphaltMaterial);
+            Surface("RampApproach", root, new(0f, 4.75f, 25f), new(12f, .5f, 30f), asphaltMaterial);
+            Surface("WestTurnaround", root, new(-20f, 4.75f, 25f), new(28f, .5f, 30f), asphaltMaterial);
+            Surface("EastTurnaround", root, new(20f, 4.75f, 25f), new(28f, .5f, 30f), asphaltMaterial);
+            Surface("TrailerParkingArea", root, new(38f, 4.75f, 50f), new(8f, .5f, 25f), asphaltMaterial);
+
+            Transform ramp = Group("TwoLaneLaunchRamp", root);
+            Vector2[] profile = { new(10f, 5f), new(8f, 4.96f), new(6f, 4.84f),
+                new(4f, 4.64f), new(-32f, .32f), new(-45f, -1.24f) };
+            string[] names = { "CrestTransition_02Percent", "CrestTransition_06Percent",
+                "CrestTransition_10Percent", "MainRamp_12Percent", "SubmergedContinuation" };
+            for (int i = 0; i < profile.Length - 1; i++)
+                SlopeSurface(names[i], ramp, profile[i], profile[i + 1], 9f, concreteMaterial, out _);
+
+            Transform crest = Group("RampCrestReference", root);
+            crest.position = new Vector3(0f, 5.05f, 10f);
+
+            BuildRampMarkings(root, profile);
+            BuildDock(root);
+            Surface("WestTerrain", root, new(-45f, 2.25f, 25f), new(22f, 5.5f, 140f), terrainMaterial);
+            Surface("EastTerrain", root, new(51f, 2.25f, 25f), new(18f, 5.5f, 140f), terrainMaterial);
+            Surface("ShorelineWest", root, new(-18f, .7f, -30f), new(27f, 1.4f, 40f), terrainMaterial);
+            Surface("ShorelineEast", root, new(22f, .7f, -30f), new(31f, 1.4f, 40f), terrainMaterial);
+
+            GameObject water = Primitive("WaterPlane", PrimitiveType.Cube, root, new(0f, -.06f, -43f),
+                new(90f, .12f, 55f), true);
+            SetMaterial(water, waterMaterial);
+
+            BuildScenarioTriggers(root);
+            return crest;
+        }
+
+        private static GameObject Surface(string name, Transform parent, Vector3 position, Vector3 scale, Material material)
+        {
+            GameObject value = Primitive(name, PrimitiveType.Cube, parent, position, scale, false);
+            SetMaterial(value, material);
+            return value;
+        }
+
+        private static void SlopeSurface(string name, Transform parent, Vector2 upper, Vector2 lower,
+            float width, Material material, out Transform result)
+        {
+            Vector3 start = new(0f, upper.y, upper.x);
+            Vector3 end = new(0f, lower.y, lower.x);
+            Vector3 direction = end - start;
+            Quaternion rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+            GameObject value = Primitive(name, PrimitiveType.Cube, parent, Vector3.zero,
+                new(width, .25f, direction.magnitude), false);
+            value.transform.position = (start + end) * .5f - rotation * Vector3.up * .125f;
+            value.transform.rotation = rotation;
+            SetMaterial(value, material);
+            result = value.transform;
+        }
+
+        private static void BuildRampMarkings(Transform root, Vector2[] profile)
+        {
+            Transform markings = Group("ColliderFreeSiteMarkings", root);
+            for (int i = 0; i < profile.Length - 1; i++)
+            {
+                Vector3 start = new(0f, profile[i].y, profile[i].x);
+                Vector3 end = new(0f, profile[i + 1].y, profile[i + 1].x);
+                Vector3 direction = end - start;
+                Quaternion rotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
+                GameObject center = Primitive($"RampCenterLine_{i}", PrimitiveType.Cube, markings, Vector3.zero,
+                    new(.14f, .025f, direction.magnitude - .05f), true);
+                center.transform.position = (start + end) * .5f + rotation * Vector3.up * .025f;
+                center.transform.rotation = rotation;
+                SetMaterial(center, lineMaterial);
+            }
+            for (int i = 0; i < 7; i++)
+            {
+                float z = 18f + i * 6f;
+                CourseMark($"StagingSpace_{i}", markings, new(-18f + i * 6f, 5.015f, 52f),
+                    new(4.8f, .025f, .14f), lineMaterial);
+            }
+            CourseMark("TrafficArrowStem", markings, new(0f, 5.015f, 35f), new(.18f, .025f, 5f), hitchMaterial);
+            GameObject arrow = Primitive("TrafficArrowHead", PrimitiveType.Cube, markings,
+                new(0f, 5.02f, 32.2f), new(1.5f, .03f, 1.5f), true);
+            arrow.transform.localRotation = Quaternion.Euler(0f, 45f, 0f);
+            SetMaterial(arrow, hitchMaterial);
+            for (int i = 0; i < 5; i++)
+                CourseMark($"TrailerParkingOutline_{i}", markings, new(38f, 5.015f, 41f + i * 4f),
+                    new(7.5f, .025f, .12f), lineMaterial);
+            Transform loop = Group("TurningLoop", markings);
+            for (int i = 0; i < 16; i++)
+            {
+                float angle = i * Mathf.PI * 2f / 16f;
+                Vector3 position = new(Mathf.Cos(angle) * 22f, 5.02f, 34f + Mathf.Sin(angle) * 14f);
+                GameObject dash = Primitive($"LoopDash_{i}", PrimitiveType.Cube, loop, position,
+                    new(.16f, .025f, 2.2f), true);
+                dash.transform.localRotation = Quaternion.Euler(0f, -angle * Mathf.Rad2Deg, 0f);
+                SetMaterial(dash, hitchMaterial);
+            }
+        }
+
+        private static void BuildDock(Transform root)
+        {
+            Transform dock = Group("ModularDock", root);
+            Surface("DockWalkway", dock, new(5.8f, .22f, -18f), new(1.6f, .44f, 24f), dockMaterial);
+            for (int i = 0; i < 5; i++)
+            {
+                float z = -7f - i * 5.5f;
+                Surface($"DockPiling_{i}", dock, new(6.45f, -.15f, z), new(.25f, 2.1f, .25f), dockMaterial);
+            }
+        }
+
+        private static void BuildScenarioTriggers(Transform root)
+        {
+            CreateScenarioTrigger("SiteEntranceTrigger", root, new(0f, 6f, 84f), new(10f, 3f, 2f), "Entered boat-ramp site.");
+            CreateScenarioTrigger("StagingAreaTrigger", root, new(0f, 6f, 52f), new(30f, 3f, 5f), "Entered staging area.");
+            CreateScenarioTrigger("RampApproachTrigger", root, new(0f, 6f, 20f), new(10f, 3f, 3f), "Approaching launch lanes.");
+            CreateScenarioTrigger("RampCrestTrigger", root, new(0f, 5.2f, 9f), new(9f, 3f, 2f), "Crossed ramp crest.");
+            CreateScenarioTrigger("TargetLaunchDepthTrigger", root, new(0f, .5f, -35f), new(9f, 4f, 3f), "Reached prototype launch depth.");
+            CreateScenarioTrigger("TrailerParkingTrigger", root, new(38f, 6f, 50f), new(8f, 3f, 8f), "Entered trailer parking area.");
+        }
+
+        private static void CreateScenarioTrigger(string name, Transform parent, Vector3 position,
+            Vector3 size, string message)
+        {
+            Transform trigger = Group(name, parent); trigger.localPosition = position;
+            BoxCollider collider = trigger.gameObject.AddComponent<BoxCollider>(); collider.size = size; collider.isTrigger = true;
+            trigger.gameObject.AddComponent<BoatRampScenarioTrigger>().Configure(message);
+        }
+
+        private static void BuildBoatRampSightLineDebug(GameObject vehicleRoot, Transform driverEye,
+            Transform trailer, Transform crestReference)
+        {
+            Transform trailerTop = Group("TrailerTopSightLineReference", trailer);
+            trailerTop.localPosition = new Vector3(0f, TrailerSize.y * .5f, TrailerBodyCenterZ);
+            Transform markers = Group("BoatRampSightLineMarkers", vehicleRoot.transform);
+            SetMaterial(Primitive("DriverEyeMarker", PrimitiveType.Sphere, markers, Vector3.zero,
+                new(.18f, .18f, .18f), true), targetMaterial);
+            SetMaterial(Primitive("TrailerTopMarker", PrimitiveType.Sphere, markers, Vector3.zero,
+                new(.18f, .18f, .18f), true), hitchMaterial);
+            SetMaterial(Primitive("CrestMarker", PrimitiveType.Cube, markers, Vector3.zero,
+                new(9.4f, .16f, .16f), true), hazardMaterial);
+            markers.gameObject.SetActive(false);
+            vehicleRoot.AddComponent<BoatRampSightLineDebug>().Configure(driverEye, trailerTop,
+                crestReference, markers.gameObject);
+        }
+
+        private static Collider FindEnvironmentGroundCollider(Scene scene)
+        {
+            foreach (GameObject sceneRoot in scene.GetRootGameObjects())
+            {
+                if (sceneRoot.name != BoatRampEnvironmentName) continue;
+                Transform access = sceneRoot.transform.Find("EntranceAccessRoad");
+                if (access != null) return access.GetComponent<Collider>();
+            }
+            return null;
+        }
+
+        private static void BuildCameras(Scene scene, GameObject root, Transform driverMount,
+            Vector3? diagnosticTargetPosition = null, Vector3? diagnosticCameraPosition = null)
         {
             // Replace prior player and mirror cameras; the prototype root is also recreated each run.
             foreach (GameObject sceneRoot in scene.GetRootGameObjects())
@@ -215,9 +488,9 @@ namespace LaunchRamp.Editor
             driver.fieldOfView = 65f;
 
             Transform target = Group("DiagnosticCameraTarget", root.transform);
-            target.position = new Vector3(0f, 0f, 32f);
+            target.position = diagnosticTargetPosition ?? new Vector3(0f, 0f, 32f);
             Transform diagnosticTransform = Group("DiagnosticCamera", root.transform);
-            diagnosticTransform.position = new Vector3(18f, 28f, -18f);
+            diagnosticTransform.position = diagnosticCameraPosition ?? new Vector3(18f, 28f, -18f);
             diagnosticTransform.rotation = Quaternion.LookRotation(target.position - diagnosticTransform.position);
             UnityEngine.Camera diagnostic = diagnosticTransform.gameObject.AddComponent<UnityEngine.Camera>();
             diagnostic.fieldOfView = 60f;
@@ -487,10 +760,11 @@ namespace LaunchRamp.Editor
             return camera;
         }
 
-        private static Rigidbody BuildTruck(Transform parent)
+        private static Rigidbody BuildTruck(Transform parent, Vector3? spawnPosition = null, Quaternion? spawnRotation = null)
         {
             GameObject truck = Group("Truck", parent).gameObject;
-            truck.transform.localPosition = new(0f, 1.1f, 3.5f);
+            truck.transform.localPosition = spawnPosition ?? new Vector3(0f, 1.1f, 3.5f);
+            truck.transform.localRotation = spawnRotation ?? Quaternion.identity;
             Rigidbody body = truck.AddComponent<Rigidbody>();
             body.mass = TruckMass; body.centerOfMass = new(0f, -.30f, .10f);
             body.interpolation = RigidbodyInterpolation.Interpolate;
@@ -554,7 +828,8 @@ namespace LaunchRamp.Editor
             if (connectTrailer)
             {
                 Vector3 hitchWorld = truckBody.transform.TransformPoint(new Vector3(0f, 0f, TruckHitchZ));
-                trailer.transform.position = hitchWorld - new Vector3(0f, 0f, TrailerHitchZ);
+                trailer.transform.rotation = truckBody.rotation;
+                trailer.transform.position = hitchWorld - trailer.transform.rotation * new Vector3(0f, 0f, TrailerHitchZ);
             }
             else trailer.transform.localPosition = new Vector3(0f, 1.1f, -11f);
             Rigidbody body = trailer.AddComponent<Rigidbody>();
@@ -681,6 +956,26 @@ namespace LaunchRamp.Editor
             hazardMaterial = EnsureColorMaterial("Prototype_Hazard_Red", new Color(.82f, .035f, .025f), .22f);
             hitchMaterial = EnsureColorMaterial("Prototype_Hitch_Yellow", new Color(.95f, .68f, .03f), .28f);
             mirrorHousingMaterial = EnsureColorMaterial("Prototype_MirrorHousing_Black", new Color(.012f, .012f, .015f), .35f);
+            asphaltMaterial = EnsureColorMaterial("Prototype_Asphalt_Dark", new Color(.12f, .13f, .14f), .08f);
+            concreteMaterial = EnsureColorMaterial("Prototype_Ramp_Concrete", new Color(.48f, .50f, .50f), .12f);
+            terrainMaterial = EnsureColorMaterial("Prototype_Terrain_BrownGreen", new Color(.26f, .32f, .16f), .05f);
+            dockMaterial = EnsureColorMaterial("Prototype_Dock_Brown", new Color(.34f, .20f, .10f), .18f);
+            waterMaterial = EnsureTransparentMaterial("Prototype_Water_BlueGreen", new Color(.03f, .42f, .48f, .62f));
+        }
+
+        private static Material EnsureTransparentMaterial(string name, Color color)
+        {
+            Material material = EnsureColorMaterial(name, color, .45f);
+            if (material.HasProperty("_Surface")) material.SetFloat("_Surface", 1f);
+            if (material.HasProperty("_Blend")) material.SetFloat("_Blend", 0f);
+            if (material.HasProperty("_SrcBlend")) material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            if (material.HasProperty("_DstBlend")) material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            if (material.HasProperty("_ZWrite")) material.SetFloat("_ZWrite", 0f);
+            material.SetOverrideTag("RenderType", "Transparent");
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            EditorUtility.SetDirty(material);
+            return material;
         }
 
         private static Material EnsureColorMaterial(string name, Color color, float smoothness)
