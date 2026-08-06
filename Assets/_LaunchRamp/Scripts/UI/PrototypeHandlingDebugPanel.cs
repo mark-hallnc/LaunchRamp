@@ -1,4 +1,3 @@
-using LaunchRamp.Input;
 using LaunchRamp.Trailer;
 using LaunchRamp.Vehicle;
 using TMPro;
@@ -13,20 +12,18 @@ namespace LaunchRamp.UI
         [SerializeField] private GameObject panelRoot;
         [SerializeField] private TMP_Text text;
         [SerializeField] private PrototypeTruckController truckController;
-        [SerializeField] private VehicleInputReader input;
         [SerializeField] private Rigidbody truckBody;
         [SerializeField] private Rigidbody trailerBody;
         [SerializeField] private Transform truckHitch;
         [SerializeField] private Transform trailerHitch;
         [SerializeField] private PassiveTrailerAxle passiveAxle;
-
         private InputAction _toggle;
 
         public void Configure(GameObject root, TMP_Text targetText, PrototypeTruckController controller,
-            VehicleInputReader inputReader, Rigidbody truck, Rigidbody trailer, Transform truckAnchor,
+            Rigidbody truck, Rigidbody trailer, Transform truckAnchor,
             Transform trailerAnchor, PassiveTrailerAxle axle)
         {
-            panelRoot = root; text = targetText; truckController = controller; input = inputReader;
+            panelRoot = root; text = targetText; truckController = controller;
             truckBody = truck; trailerBody = trailer; truckHitch = truckAnchor;
             trailerHitch = trailerAnchor; passiveAxle = axle;
         }
@@ -54,17 +51,17 @@ namespace LaunchRamp.UI
         private void Update()
         {
             if (text == null || panelRoot == null || !panelRoot.activeSelf || truckController == null) return;
-            float yaw = 0f;
-            if (truckBody != null && trailerBody != null)
-                yaw = Mathf.DeltaAngle(0f, (Quaternion.Inverse(truckBody.rotation) * trailerBody.rotation).eulerAngles.y);
+            float yaw = truckBody != null && trailerBody != null
+                ? Mathf.DeltaAngle(0f, (Quaternion.Inverse(truckBody.rotation) * trailerBody.rotation).eulerAngles.y) : 0f;
             float separation = truckHitch != null && trailerHitch != null
                 ? Vector3.Distance(truckHitch.position, trailerHitch.position) : 0f;
-            float drive = input != null ? input.Drive : truckController.DriveInput;
-            string direction = drive > .05f ? "Forward" : drive < -.05f ? "Reverse" : "Neutral";
             text.text = $"BACKING TEST\nSpeed  {Mathf.Abs(truckController.ForwardSpeedMilesPerHour):F1} mph\n" +
-                        $"Drive  {direction}\nSteer  {truckController.SteeringInput:F2}\n" +
-                        $"Parking brake  {truckController.ParkingBrakeApplied}\nTrailer yaw  {yaw:F1}°\n" +
-                        $"Hitch separation  {separation:F3} m\n" +
+                        $"Gear  {truckController.GearLabel}\n" +
+                        $"Accelerator  {truckController.AcceleratorInput * 100f:F0}%\n" +
+                        $"Service brake  {truckController.ServiceBrakeInput * 100f:F0}%\n" +
+                        $"Steer  {truckController.SteeringInput:F2}\n" +
+                        $"Parking brake  {(truckController.ParkingBrakeApplied ? "On" : "Off")}\n" +
+                        $"Trailer yaw  {yaw:F1} deg\nHitch separation  {separation:F3} m\n" +
                         $"Axle grounded  L:{passiveAxle != null && passiveAxle.LeftGrounded} " +
                         $"R:{passiveAxle != null && passiveAxle.RightGrounded}";
         }

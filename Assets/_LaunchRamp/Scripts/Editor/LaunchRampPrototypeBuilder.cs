@@ -55,8 +55,8 @@ namespace LaunchRamp.Editor
         private const float LeftMirrorSurfaceYawOffset = 0f, RightMirrorSurfaceYawOffset = 0f;
         private const float MirrorWidth = .64f, MirrorHeight = .30f, MirrorThickness = .06f;
         private const float MirrorFieldOfView = 42f;
-        private const float MotorTorque = 2100f, BrakeTorque = 3600f, ParkingBrakeTorque = 6500f;
-        private const float SteerAngle = 30f, ReverseEngagementSpeed = 1.5f;
+        private const float MotorTorque = 2100f, BrakeTorque = 7000f, ParkingBrakeTorque = 9000f;
+        private const float SteerAngle = 30f, SafeDirectionChangeSpeed = .5f;
         private const float TruckOverallLength = 5.7f, TruckWheelbase = 3.5f;
         private const float TruckFrontAxleZ = 1.45f, TruckRearAxleZ = -2.05f, TruckHitchZ = -3.05f;
         private const float TrailerOverallLength = 5.8f, TrailerBodyCenterZ = -.4f;
@@ -653,7 +653,7 @@ namespace LaunchRamp.Editor
             RectTransform panelRect = panel.GetComponent<RectTransform>();
             panelRect.anchorMin = panelRect.anchorMax = panelRect.pivot = new Vector2(0f, 1f);
             panelRect.anchoredPosition = new Vector2(18f, -18f);
-            panelRect.sizeDelta = new Vector2(390f, 235f);
+            panelRect.sizeDelta = new Vector2(390f, 285f);
             panel.GetComponent<Image>().color = new Color(0f, 0f, 0f, .68f);
 
             GameObject textObject = new("Telemetry", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
@@ -665,8 +665,8 @@ namespace LaunchRamp.Editor
             text.fontSize = 18f; text.color = Color.white; text.alignment = TextAlignmentOptions.TopLeft;
 
             root.AddComponent<PrototypeHandlingDebugPanel>().Configure(panel, text,
-                truck.GetComponent<PrototypeTruckController>(), truck.GetComponent<VehicleInputReader>(),
-                truck, trailer, truckHitch, trailerHitch, trailer.GetComponent<PassiveTrailerAxle>());
+                truck.GetComponent<PrototypeTruckController>(), truck, trailer, truckHitch,
+                trailerHitch, trailer.GetComponent<PassiveTrailerAxle>());
         }
 
         private static void BuildMirrorDebug(GameObject root, UnityEngine.Camera left, UnityEngine.Camera right,
@@ -790,7 +790,7 @@ namespace LaunchRamp.Editor
             Transform camera = Group("DriverCameraMount", truck.transform); camera.localPosition = DriverEyePosition;
             truck.AddComponent<VehicleInputReader>();
             truck.AddComponent<PrototypeTruckController>().Configure(wheels, MotorTorque, BrakeTorque,
-                ParkingBrakeTorque, SteerAngle, ReverseEngagementSpeed);
+                ParkingBrakeTorque, SteerAngle, SafeDirectionChangeSpeed);
             return body;
         }
 

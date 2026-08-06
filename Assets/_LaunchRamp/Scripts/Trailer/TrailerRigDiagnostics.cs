@@ -97,7 +97,7 @@ namespace LaunchRamp.Trailer
             }
 
             VehicleInputReader input = truckBody.GetComponent<VehicleInputReader>();
-            if (!logWhileThrottleHeld || input == null || Mathf.Abs(input.Drive) <= .01f) return;
+            if (!logWhileThrottleHeld || input == null || input.Accelerator <= .01f) return;
 
             var message = new StringBuilder(768);
             float bodyMinimumY = trailerBodyCollider != null ? trailerBodyCollider.bounds.min.y : float.NaN;

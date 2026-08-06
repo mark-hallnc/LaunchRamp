@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using LaunchRamp.Vehicle;
 
 namespace LaunchRamp.Input
 {
@@ -74,6 +75,8 @@ namespace LaunchRamp.Input
                 usePractice ? practiceTruckRotation : _truckRotation);
             ResetBody(trailerBody, usePractice ? practiceTrailerPosition : _trailerPosition,
                 usePractice ? practiceTrailerRotation : _trailerRotation);
+            PrototypeTruckController controller = truckBody.GetComponent<PrototypeTruckController>();
+            if (controller != null) controller.ResetToPark();
             Debug.Log(usePractice
                 ? "[Launch Ramp] Truck and trailer reset to the ramp practice spawn."
                 : hasPracticeSpawn
