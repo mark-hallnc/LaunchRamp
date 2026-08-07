@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: ff6f03ac3d8adc64ca4e944b0d2f9872
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 203314
+  packageName: Free Pickup Truck
+  packageVersion: 1.0
+  assetPath: Assets/PickupTruck/Assets/Material/Concrete/Concrete.mat
+  uploadId: 453638

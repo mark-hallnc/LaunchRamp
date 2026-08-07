@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 1f222bca55a14e24fa2b6e67fbc11182
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 2100000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 203314
+  packageName: Free Pickup Truck
+  packageVersion: 1.0
+  assetPath: Assets/PickupTruck/Assets/Model/CarMaterials/Front.mat
+  uploadId: 453638

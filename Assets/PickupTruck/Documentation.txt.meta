@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: a48579d250528ad4f872d88777ee13ed
+TextScriptImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 203314
+  packageName: Free Pickup Truck
+  packageVersion: 1.0
+  assetPath: Assets/PickupTruck/Documentation.txt
+  uploadId: 453638
