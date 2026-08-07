@@ -33,12 +33,13 @@ namespace LaunchRamp.Editor
         private const float TruckMass = 2200f, TrailerFrameMass = 600f, BoatLoadMass = 1050f;
         private const float TrailerMass = TrailerFrameMass + BoatLoadMass;
         private const float BoatLength = 6.3f, BoatBeam = 2.2f, BoatHullHeight = 1.15f;
-        private const float BoatCenterZ = -.10f, BoatHullBottomY = .55f;
+        private const float BoatCenterZ = -.10f, BoatHullBottomY = .23f;
         private const float TrailerYawLimit = 70f, BoatJackknifeSafetyMargin = 4f;
         private const float WheelRadius = .52f, WheelWidth = .34f, SuspensionDistance = .28f;
         private const float TruckSuspensionSpring = 38000f, TruckSuspensionDamper = 5200f;
-        private const float TrailerSuspensionSpring = 40000f, TrailerSuspensionDamper = 6000f;
-        private const float TrailerLateralGrip = 6000f, TrailerRollingResistance = 100f;
+        private const float TrailerWheelRadius = .38f, TrailerWheelWidth = .30f;
+        private const float TrailerSuspensionSpring = 20000f, TrailerSuspensionDamper = 3000f;
+        private const float TrailerLateralGrip = 3000f, TrailerRollingResistance = 50f;
         private const float TruckHalfWidth = 1.10f;
         private const float MirrorOutboardExtension = .30f;
         private const float MirrorTargetOutboardOffset = .15f;
@@ -65,6 +66,9 @@ namespace LaunchRamp.Editor
         private const float TruckFrontAxleZ = 1.45f, TruckRearAxleZ = -2.05f, TruckHitchZ = -3.05f;
         private const float TrailerOverallLength = 5.8f, TrailerBodyCenterZ = -.4f;
         private const float TrailerHitchZ = 3.2f, TrailerAxleZ = -1f, TrailerHitchToAxle = 4.2f;
+        private const float TrailerAxleSpread = 1f;
+        private const float TrailerFrontAxleZ = TrailerAxleZ + TrailerAxleSpread * .5f;
+        private const float TrailerRearAxleZ = TrailerAxleZ - TrailerAxleSpread * .5f;
         private static readonly Vector3 TruckSize = new(2.2f, .35f, 5.5f);
         private static readonly Vector3 TrailerSize = new(2.2f, .8f, TrailerOverallLength);
         private static readonly Vector3 TruckColliderSize = new(2.1f, .4f, 5.6f);
@@ -237,10 +241,11 @@ namespace LaunchRamp.Editor
                 Transform truckHitch = truck?.Find("HitchPoint"); Transform trailerHitch = trailer?.Find("HitchPoint");
                 if (truckHitch == null || trailerHitch == null || Vector3.Distance(truckHitch.position, trailerHitch.position) > .01f)
                     issues.Add("Truck/trailer hitch anchors are not coincident.");
-                foreach (string wheel in new[] { "Wheels/LeftWheelPoint", "Wheels/RightWheelPoint" })
+                foreach (string wheel in new[] { "Wheels/FrontLeftWheelPoint", "Wheels/FrontRightWheelPoint",
+                             "Wheels/RearLeftWheelPoint", "Wheels/RearRightWheelPoint" })
                 {
                     Transform point = trailer?.Find(wheel);
-                    if (point == null || !Physics.Raycast(point.position, -trailer.up, out _, WheelRadius + .3f,
+                    if (point == null || !Physics.Raycast(point.position, -trailer.up, out _, TrailerWheelRadius + .3f,
                             ~0, QueryTriggerInteraction.Ignore))
                         issues.Add($"Passive trailer suspension point is not grounded: {wheel}.");
                 }
@@ -865,28 +870,33 @@ namespace LaunchRamp.Editor
             else trailer.transform.localPosition = new Vector3(0f, 1.1f, -11f);
             Rigidbody body = trailer.AddComponent<Rigidbody>();
             body.mass = TrailerMass;
-            // Combined 600 kg frame + 1050 kg secured boat load. The COM is above the frame
-            // and slightly aft, but intentionally conservative for the first towing prototype.
-            body.centerOfMass = new Vector3(0f, .38f, -.35f);
+            // Combined 600 kg frame + 1050 kg secured boat load. Lowering the boat permits
+            // a corresponding, geometry-derived COM reduction without placing it below the frame.
+            body.centerOfMass = new Vector3(0f, .28f, -.35f);
             body.interpolation = RigidbodyInterpolation.Interpolate;
             body.collisionDetectionMode = CollisionDetectionMode.Continuous;
             BoxCollider trailerCollider = trailer.AddComponent<BoxCollider>();
             trailerCollider.size = TrailerColliderSize;
             trailerCollider.center = TrailerColliderCenter;
-            SetMaterial(Primitive("TrailerBody", PrimitiveType.Cube, trailer.transform,
-                new(0f, 0f, TrailerBodyCenterZ), TrailerSize, true), trailerMaterial);
+            BuildOpenTrailerFrame(trailer.transform);
 
             Transform wheelGroup = Group("Wheels", trailer.transform);
-            Vector3[] positions = { new(-1.12f, -.35f, TrailerAxleZ), new(1.12f, -.35f, TrailerAxleZ) };
-            Transform leftPoint = Group("LeftWheelPoint", wheelGroup); leftPoint.localPosition = positions[0];
-            Transform rightPoint = Group("RightWheelPoint", wheelGroup); rightPoint.localPosition = positions[1];
-            Transform leftVisual = WheelVisual("LeftWheelVisual", trailer.transform, positions[0]);
-            Transform rightVisual = WheelVisual("RightWheelVisual", trailer.transform, positions[1]);
+            Vector3[] positions =
+            {
+                new(-1.08f, -.58f, TrailerFrontAxleZ), new(1.08f, -.58f, TrailerFrontAxleZ),
+                new(-1.08f, -.58f, TrailerRearAxleZ), new(1.08f, -.58f, TrailerRearAxleZ)
+            };
+            string[] wheelNames = { "FrontLeft", "FrontRight", "RearLeft", "RearRight" };
+            var bindings = new PassiveTrailerAxle.WheelBinding[4];
+            for (int i = 0; i < bindings.Length; i++)
+            {
+                Transform point = Group(wheelNames[i] + "WheelPoint", wheelGroup);
+                point.localPosition = positions[i];
+                Transform visual = TrailerWheelVisual(wheelNames[i] + "WheelVisual", trailer.transform, positions[i]);
+                bindings[i] = new PassiveTrailerAxle.WheelBinding
+                    { Label = wheelNames[i], Point = point, Visual = visual };
+            }
             Transform hitch = Group("HitchPoint", trailer.transform); hitch.localPosition = new(0f, 0f, TrailerHitchZ);
-            float trailerFrontZ = TrailerBodyCenterZ + TrailerOverallLength * .5f;
-            float tongueLength = TrailerHitchZ - trailerFrontZ;
-            SetMaterial(Primitive("TrailerTongue", PrimitiveType.Cube, trailer.transform,
-                new(0f, .05f, trailerFrontZ + tongueLength * .5f), new(.35f, .18f, tongueLength), true), hitchMaterial);
             BuildBoatLoad(trailer.transform);
             if (connectTrailer)
             {
@@ -906,9 +916,59 @@ namespace LaunchRamp.Editor
                 joint.angularZLimit = new SoftJointLimit { limit = 8f };
                 joint.enableCollision = false;
             }
-            trailer.AddComponent<PassiveTrailerAxle>().Configure(body, leftPoint, rightPoint,
-                leftVisual, rightVisual, ~0, WheelRadius, .30f, TrailerSuspensionSpring,
-                TrailerSuspensionDamper, TrailerLateralGrip, TrailerRollingResistance, WheelWidth);
+            trailer.AddComponent<PassiveTrailerAxle>().Configure(body, bindings, ~0,
+                TrailerWheelRadius, .30f, TrailerSuspensionSpring, TrailerSuspensionDamper,
+                TrailerLateralGrip, TrailerRollingResistance, TrailerWheelWidth);
+        }
+
+        private static void BuildOpenTrailerFrame(Transform trailer)
+        {
+            // Visible structure is collider-free; the root BoxCollider remains the deliberately
+            // simple physical frame envelope. Rails nest around the keel instead of forming a slab.
+            FrameBox("LeftFrameRail", trailer, new(-.72f, -.04f, -.40f), new(.16f, .18f, 5.60f), trailerMaterial);
+            FrameBox("RightFrameRail", trailer, new(.72f, -.04f, -.40f), new(.16f, .18f, 5.60f), trailerMaterial);
+            float[] crossmemberZ = { -3.22f, -2.15f, -1.05f, .05f, 1.18f };
+            for (int i = 0; i < crossmemberZ.Length; i++)
+                FrameBox(i == 0 ? "RearCrossmember" : $"Crossmember_{i}", trailer,
+                    new(0f, .02f, crossmemberZ[i]), new(1.62f, .14f, .14f), trailerMaterial);
+
+            VisualBeam("LeftAFrameTongue", trailer, new(-.72f, -.04f, 2.38f),
+                new(0f, .02f, TrailerHitchZ), .16f, hitchMaterial);
+            VisualBeam("RightAFrameTongue", trailer, new(.72f, -.04f, 2.38f),
+                new(0f, .02f, TrailerHitchZ), .16f, hitchMaterial);
+            FrameBox("FrontAxleMount", trailer, new(0f, -.17f, TrailerFrontAxleZ),
+                new(1.82f, .12f, .16f), trailerMaterial);
+            FrameBox("RearAxleMount", trailer, new(0f, -.17f, TrailerRearAxleZ),
+                new(1.82f, .12f, .16f), trailerMaterial);
+
+            GameObject leftBunk = FrameBox("LeftBunk", trailer, new(-.52f, .145f, -.62f),
+                new(.18f, .12f, 4.70f), wheelMaterial);
+            GameObject rightBunk = FrameBox("RightBunk", trailer, new(.52f, .145f, -.62f),
+                new(.18f, .12f, 4.70f), wheelMaterial);
+            leftBunk.transform.localRotation = Quaternion.Euler(0f, 0f, -8f);
+            rightBunk.transform.localRotation = Quaternion.Euler(0f, 0f, 8f);
+
+            FrameBox("LeftFender", trailer, new(-1.12f, -.15f, TrailerAxleZ),
+                new(.16f, .16f, 2.05f), trailerMaterial);
+            FrameBox("RightFender", trailer, new(1.12f, -.15f, TrailerAxleZ),
+                new(.16f, .16f, 2.05f), trailerMaterial);
+        }
+
+        private static GameObject FrameBox(string name, Transform parent, Vector3 position,
+            Vector3 scale, Material material)
+        {
+            GameObject box = Primitive(name, PrimitiveType.Cube, parent, position, scale, true);
+            SetMaterial(box, material);
+            return box;
+        }
+
+        private static void VisualBeam(string name, Transform parent, Vector3 start, Vector3 end,
+            float width, Material material)
+        {
+            Vector3 direction = end - start;
+            GameObject beam = FrameBox(name, parent, (start + end) * .5f,
+                new(width, width, direction.magnitude), material);
+            beam.transform.localRotation = Quaternion.LookRotation(direction.normalized, Vector3.up);
         }
 
         private static void BuildBoatLoad(Transform trailer)
@@ -952,8 +1012,12 @@ namespace LaunchRamp.Editor
 
             Transform top = Group("BoatTopReference", boat); top.localPosition = new Vector3(.28f, 1.52f, .43f);
             Transform stern = Group("BoatSternReference", boat); stern.localPosition = new Vector3(0f, .78f, -BoatLength * .5f);
-            SetMaterial(Primitive("WinchPost", PrimitiveType.Cube, trailer,
-                new(0f, .72f, 2.68f), new(.16f, 1.35f, .16f), true), hitchMaterial);
+            GameObject post = Primitive("WinchPost", PrimitiveType.Cube, trailer,
+                new(0f, .70f, 2.62f), new(.16f, 1.32f, .16f), true);
+            post.transform.localRotation = Quaternion.Euler(-10f, 0f, 0f);
+            SetMaterial(post, hitchMaterial);
+            SetMaterial(Primitive("BowStop", PrimitiveType.Cube, trailer,
+                new(0f, 1.20f, 2.76f), new(.42f, .22f, .18f), true), wheelMaterial);
         }
 
         private static float EstimateBoatTruckContactAngle()
@@ -1070,6 +1134,18 @@ namespace LaunchRamp.Editor
                 new(WheelRadius * 2f, WheelWidth * .5f, WheelRadius * 2f), true);
             visual.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
             SetMaterial(visual, wheelMaterial);
+            return visual.transform;
+        }
+
+        private static Transform TrailerWheelVisual(string name, Transform parent, Vector3 position)
+        {
+            GameObject visual = Primitive(name, PrimitiveType.Cylinder, parent, position,
+                new(TrailerWheelRadius * 2f, TrailerWheelWidth * .5f, TrailerWheelRadius * 2f), true);
+            visual.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+            SetMaterial(visual, wheelMaterial);
+            GameObject hub = Primitive("Hub", PrimitiveType.Cylinder, visual.transform, Vector3.zero,
+                new(.52f, 1.04f, .52f), true);
+            SetMaterial(hub, lineMaterial);
             return visual.transform;
         }
 

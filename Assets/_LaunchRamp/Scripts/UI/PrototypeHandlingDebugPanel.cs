@@ -68,8 +68,10 @@ namespace LaunchRamp.UI
                         $"Trailer/load mass  {(trailerBody != null ? trailerBody.mass : 0f):F0} kg\n" +
                         $"Load COM  {(trailerBody != null ? trailerBody.centerOfMass : Vector3.zero):F2}\n" +
                         $"Boat top vs eye  {(boatTop != null && driverEye != null ? boatTop.position.y - driverEye.position.y : 0f):F2} m\n" +
-                        $"Axle grounded  L:{passiveAxle != null && passiveAxle.LeftGrounded} " +
-                        $"R:{passiveAxle != null && passiveAxle.RightGrounded}";
+                        $"Axles grounded  FL:{passiveAxle != null && passiveAxle.FrontLeftGrounded} " +
+                        $"FR:{passiveAxle != null && passiveAxle.FrontRightGrounded} " +
+                        $"RL:{passiveAxle != null && passiveAxle.RearLeftGrounded} " +
+                        $"RR:{passiveAxle != null && passiveAxle.RearRightGrounded}";
         }
 
         private void OnToggle(InputAction.CallbackContext context)
