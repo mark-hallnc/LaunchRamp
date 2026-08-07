@@ -1,4 +1,5 @@
 using TMPro;
+using LaunchRamp.Input;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -10,6 +11,8 @@ namespace LaunchRamp.Camera
         [SerializeField] private UnityEngine.Camera driverCamera;
         [SerializeField] private UnityEngine.Camera diagnosticCamera;
         [SerializeField] private UnityEngine.Camera exteriorCamera;
+        [SerializeField] private UnityEngine.Camera freeCamera;
+        [SerializeField] private PrototypeFreeCameraController freeCameraController;
         [SerializeField] private Transform diagnosticTarget;
         [SerializeField] private Transform exteriorTarget;
         [SerializeField, Range(10f, 100f)] private float orbitDistance = 60f;
@@ -28,11 +31,16 @@ namespace LaunchRamp.Camera
         private InputAction _zoom;
         private InputAction _orbitButton;
         private InputAction _exteriorToggle;
+        private InputAction _freeCameraToggle;
         private InputAction _quickLookLeft;
         private InputAction _quickLookRight;
         private bool _usingDiagnosticCamera;
         private bool _usingExteriorCamera;
         private bool _previousDiagnosticState;
+        private bool _usingFreeCamera;
+        private bool _storedDiagnosticState;
+        private bool _storedExteriorState;
+        private VehicleInputReader _vehicleInput;
         private float _orbitYaw;
         private float _orbitPitch = 25f;
         private float _driverYaw;
@@ -44,13 +52,17 @@ namespace LaunchRamp.Camera
         private float _quickLookYawVelocity;
 
         public void Configure(UnityEngine.Camera driver, UnityEngine.Camera diagnostic,
-            UnityEngine.Camera exterior, Transform diagnosticLookTarget, Transform followTarget)
+            UnityEngine.Camera exterior, UnityEngine.Camera free, PrototypeFreeCameraController freeController,
+            Transform diagnosticLookTarget, Transform followTarget)
         {
             driverCamera = driver;
             diagnosticCamera = diagnostic;
             exteriorCamera = exterior;
+            freeCamera = free;
+            freeCameraController = freeController;
             diagnosticTarget = diagnosticLookTarget;
             exteriorTarget = followTarget;
+            _vehicleInput = followTarget != null ? followTarget.GetComponent<VehicleInputReader>() : null;
             InitializeCameraAngles();
             ApplyCameraState();
         }
@@ -63,8 +75,10 @@ namespace LaunchRamp.Camera
             _zoom = new InputAction("Diagnostic Zoom", InputActionType.Value, "<Mouse>/scroll");
             _orbitButton = new InputAction("Camera Look Button", InputActionType.Button, "<Mouse>/rightButton");
             _exteriorToggle = new InputAction("Exterior Camera", InputActionType.Button, "<Keyboard>/v");
+            _freeCameraToggle = new InputAction("Free Camera", InputActionType.Button, "<Keyboard>/f2");
             _quickLookLeft = new InputAction("Quick Look Left", InputActionType.Button, "<Keyboard>/q");
             _quickLookRight = new InputAction("Quick Look Right", InputActionType.Button, "<Keyboard>/e");
+            _vehicleInput = exteriorTarget != null ? exteriorTarget.GetComponent<VehicleInputReader>() : null;
             InitializeCameraAngles();
             ApplyCameraState();
         }
@@ -78,14 +92,17 @@ namespace LaunchRamp.Camera
             _exteriorToggle?.Enable();
             _quickLookLeft?.Enable();
             _quickLookRight?.Enable();
+            _freeCameraToggle?.Enable();
             if (_switchCamera != null) _switchCamera.performed += OnSwitchCamera;
             if (_exteriorToggle != null) _exteriorToggle.performed += OnExteriorToggle;
+            if (_freeCameraToggle != null) _freeCameraToggle.performed += OnFreeCameraToggle;
         }
 
         private void OnDisable()
         {
             if (_switchCamera != null) _switchCamera.performed -= OnSwitchCamera;
             if (_exteriorToggle != null) _exteriorToggle.performed -= OnExteriorToggle;
+            if (_freeCameraToggle != null) _freeCameraToggle.performed -= OnFreeCameraToggle;
             _switchCamera?.Disable();
             _look?.Disable();
             _zoom?.Disable();
@@ -93,6 +110,7 @@ namespace LaunchRamp.Camera
             _exteriorToggle?.Disable();
             _quickLookLeft?.Disable();
             _quickLookRight?.Disable();
+            _freeCameraToggle?.Disable();
         }
 
         private void OnDestroy()
@@ -104,10 +122,12 @@ namespace LaunchRamp.Camera
             _exteriorToggle?.Dispose();
             _quickLookLeft?.Dispose();
             _quickLookRight?.Dispose();
+            _freeCameraToggle?.Dispose();
         }
 
         private void Update()
         {
+            if (_usingFreeCamera) return;
             Vector2 look = _look?.ReadValue<Vector2>() ?? Vector2.zero;
             if (_usingExteriorCamera)
             {
@@ -174,6 +194,7 @@ namespace LaunchRamp.Camera
 
         private void OnSwitchCamera(InputAction.CallbackContext context)
         {
+            if (_usingFreeCamera) return;
             _usingExteriorCamera = false;
             _usingDiagnosticCamera = !_usingDiagnosticCamera;
             ApplyCameraState();
@@ -181,17 +202,53 @@ namespace LaunchRamp.Camera
 
         private void OnExteriorToggle(InputAction.CallbackContext context)
         {
+            if (_usingFreeCamera) return;
             if (!_usingExteriorCamera) _previousDiagnosticState = _usingDiagnosticCamera;
             _usingExteriorCamera = !_usingExteriorCamera;
             if (!_usingExteriorCamera) _usingDiagnosticCamera = _previousDiagnosticState;
             ApplyCameraState();
         }
 
+        private void OnFreeCameraToggle(InputAction.CallbackContext context)
+        {
+            if (!Application.isEditor && !Debug.isDebugBuild) return;
+            if (!_usingFreeCamera)
+            {
+                _storedDiagnosticState = _usingDiagnosticCamera;
+                _storedExteriorState = _usingExteriorCamera;
+                UnityEngine.Camera source = _usingExteriorCamera ? exteriorCamera :
+                    _usingDiagnosticCamera ? diagnosticCamera : driverCamera;
+                if (freeCamera != null && source != null)
+                {
+                    if (source == driverCamera && exteriorTarget != null)
+                    {
+                        Vector3 point = exteriorTarget.position + exteriorTarget.up;
+                        freeCamera.transform.position = point - exteriorTarget.forward * 13f + Vector3.up * 7f;
+                        freeCamera.transform.rotation = Quaternion.LookRotation(point - freeCamera.transform.position, Vector3.up);
+                    }
+                    else freeCamera.transform.SetPositionAndRotation(source.transform.position, source.transform.rotation);
+                }
+                _usingFreeCamera = true;
+                if (_vehicleInput != null) _vehicleInput.enabled = false;
+                freeCameraController?.SetInspectionActive(true);
+            }
+            else
+            {
+                _usingFreeCamera = false;
+                _usingDiagnosticCamera = _storedDiagnosticState;
+                _usingExteriorCamera = _storedExteriorState;
+                freeCameraController?.SetInspectionActive(false);
+                if (_vehicleInput != null) _vehicleInput.enabled = true;
+            }
+            ApplyCameraState();
+        }
+
         private void ApplyCameraState()
         {
-            SetCameraActive(driverCamera, !_usingExteriorCamera && !_usingDiagnosticCamera);
-            SetCameraActive(diagnosticCamera, !_usingExteriorCamera && _usingDiagnosticCamera);
-            SetCameraActive(exteriorCamera, _usingExteriorCamera);
+            SetCameraActive(driverCamera, !_usingFreeCamera && !_usingExteriorCamera && !_usingDiagnosticCamera);
+            SetCameraActive(diagnosticCamera, !_usingFreeCamera && !_usingExteriorCamera && _usingDiagnosticCamera);
+            SetCameraActive(exteriorCamera, !_usingFreeCamera && _usingExteriorCamera);
+            SetCameraActive(freeCamera, _usingFreeCamera);
         }
 
         private void UpdateExteriorCamera()
@@ -233,6 +290,159 @@ namespace LaunchRamp.Camera
             AudioListener listener = target.GetComponent<AudioListener>();
             if (listener != null) listener.enabled = active;
         }
+    }
+
+    /// <summary>Development-only unscaled-time fly/pan/orbit camera.</summary>
+    public sealed class PrototypeFreeCameraController : MonoBehaviour
+    {
+        [SerializeField] private UnityEngine.Camera controlledCamera;
+        [SerializeField] private Transform truckTarget;
+        [SerializeField] private Transform trailerTarget;
+        [SerializeField] private float baseSpeed = 8f;
+        [SerializeField] private float minimumSpeed = .5f;
+        [SerializeField] private float maximumSpeed = 60f;
+        [SerializeField] private float lookSensitivity = .12f;
+        [SerializeField] private float panSensitivity = .0025f;
+        private InputAction _move, _vertical, _look, _scroll, _rightMouse, _middleMouse;
+        private InputAction _fast, _precision, _home, _end, _focus, _clearFocus, _orbitModifier;
+        private bool _inspectionActive;
+        private bool _hasFocus;
+        private Vector3 _focusPoint;
+        private float _focusDistance;
+        private float _yaw;
+        private float _pitch;
+
+        public float MovementSpeed => baseSpeed;
+
+        public void Configure(UnityEngine.Camera camera, Transform truck, Transform trailer)
+        {
+            controlledCamera = camera; truckTarget = truck; trailerTarget = trailer;
+        }
+
+        public void SetInspectionActive(bool active)
+        {
+            _inspectionActive = active;
+            if (active) CaptureAngles();
+        }
+
+        private void Awake()
+        {
+            if (controlledCamera == null) controlledCamera = GetComponent<UnityEngine.Camera>();
+            _move = new InputAction("Free Camera Move", InputActionType.Value);
+            _move.AddCompositeBinding("2DVector").With("Up", "<Keyboard>/w").With("Down", "<Keyboard>/s")
+                .With("Left", "<Keyboard>/a").With("Right", "<Keyboard>/d");
+            _vertical = new InputAction("Free Camera Vertical", InputActionType.Value);
+            _vertical.AddCompositeBinding("1DAxis").With("Negative", "<Keyboard>/q").With("Positive", "<Keyboard>/e");
+            _look = new InputAction("Free Camera Mouse", InputActionType.Value, "<Mouse>/delta");
+            _scroll = new InputAction("Free Camera Speed", InputActionType.Value, "<Mouse>/scroll");
+            _rightMouse = new InputAction("Free Camera Look Button", InputActionType.Button, "<Mouse>/rightButton");
+            _middleMouse = new InputAction("Free Camera Pan Button", InputActionType.Button, "<Mouse>/middleButton");
+            _fast = ButtonWithBindings("Free Camera Fast", "<Keyboard>/leftShift", "<Keyboard>/rightShift");
+            _precision = ButtonWithBindings("Free Camera Precision", "<Keyboard>/leftCtrl", "<Keyboard>/rightCtrl");
+            _orbitModifier = ButtonWithBindings("Free Camera Orbit Modifier", "<Keyboard>/leftAlt", "<Keyboard>/rightAlt");
+            _home = new InputAction("Focus Truck", InputActionType.Button, "<Keyboard>/home");
+            _end = new InputAction("Focus Trailer", InputActionType.Button, "<Keyboard>/end");
+            _focus = new InputAction("Set Object Focus", InputActionType.Button, "<Keyboard>/g");
+            _clearFocus = new InputAction("Clear Object Focus", InputActionType.Button, "<Keyboard>/escape");
+            CaptureAngles();
+        }
+
+        private void OnEnable() { foreach (InputAction action in Actions()) action?.Enable(); }
+        private void OnDisable() { foreach (InputAction action in Actions()) action?.Disable(); }
+        private void OnDestroy() { foreach (InputAction action in Actions()) action?.Dispose(); }
+
+        private void Update()
+        {
+            if (!_inspectionActive || controlledCamera == null) return;
+            if (_home.WasPressedThisFrame()) FrameTarget(truckTarget, 12f);
+            if (_end.WasPressedThisFrame()) FrameTarget(trailerTarget, 12f);
+            if (_focus.WasPressedThisFrame()) TogglePointFocus();
+            if (_clearFocus.WasPressedThisFrame()) _hasFocus = false;
+
+            Vector2 mouse = _look.ReadValue<Vector2>();
+            float scroll = _scroll.ReadValue<Vector2>().y;
+            if (_hasFocus && Mathf.Abs(scroll) > .01f)
+            {
+                _focusDistance = Mathf.Clamp(_focusDistance * Mathf.Exp(-scroll * .001f), .5f, 100f);
+                transform.position = _focusPoint - transform.forward * _focusDistance;
+            }
+            else if (Mathf.Abs(scroll) > .01f)
+                baseSpeed = Mathf.Clamp(baseSpeed * Mathf.Exp(scroll * .001f), minimumSpeed, maximumSpeed);
+
+            if (_rightMouse.IsPressed())
+            {
+                bool orbiting = _hasFocus && _orbitModifier.IsPressed();
+                if (_hasFocus && !orbiting) _hasFocus = false;
+                _yaw += mouse.x * lookSensitivity;
+                _pitch = Mathf.Clamp(_pitch - mouse.y * lookSensitivity, -89f, 89f);
+                transform.rotation = Quaternion.Euler(_pitch, _yaw, 0f);
+                if (orbiting)
+                {
+                    transform.position = _focusPoint - transform.forward * _focusDistance;
+                    transform.rotation = Quaternion.LookRotation(_focusPoint - transform.position, Vector3.up);
+                    CaptureAngles();
+                }
+            }
+            else if (_middleMouse.IsPressed())
+            {
+                float scale = panSensitivity * Mathf.Max(1f, baseSpeed);
+                transform.position += (-transform.right * mouse.x - transform.up * mouse.y) * scale;
+                if (_hasFocus) _focusPoint += (-transform.right * mouse.x - transform.up * mouse.y) * scale;
+            }
+
+            Vector2 move = _move.ReadValue<Vector2>();
+            float vertical = _vertical.ReadValue<float>();
+            float multiplier = _fast.IsPressed() ? 3f : _precision.IsPressed() ? .25f : 1f;
+            Vector3 velocity = transform.forward * move.y + transform.right * move.x + transform.up * vertical;
+            if (velocity.sqrMagnitude > 1f) velocity.Normalize();
+            transform.position += velocity * (baseSpeed * multiplier * Time.unscaledDeltaTime);
+            if (velocity.sqrMagnitude > 0f) _hasFocus = false;
+        }
+
+        private void TogglePointFocus()
+        {
+            if (_hasFocus) { _hasFocus = false; return; }
+            Ray ray = controlledCamera.ViewportPointToRay(new Vector3(.5f, .5f));
+            if (!Physics.Raycast(ray, out RaycastHit hit, 500f, ~0, QueryTriggerInteraction.Ignore)) return;
+            _hasFocus = true; _focusPoint = hit.point;
+            _focusDistance = Mathf.Max(.5f, Vector3.Distance(transform.position, _focusPoint));
+        }
+
+        private void FrameTarget(Transform target, float distance)
+        {
+            if (target == null) return;
+            Vector3 point = target.position + target.up * 1f;
+            transform.position = point - target.forward * distance + Vector3.up * (distance * .45f);
+            transform.rotation = Quaternion.LookRotation(point - transform.position, Vector3.up);
+            _hasFocus = true; _focusPoint = point; _focusDistance = Vector3.Distance(transform.position, point);
+            CaptureAngles();
+        }
+
+        private void CaptureAngles()
+        {
+            Vector3 euler = transform.eulerAngles;
+            _yaw = euler.y; _pitch = Mathf.DeltaAngle(0f, euler.x);
+        }
+
+        private void OnGUI()
+        {
+            if (!_inspectionActive || (!Application.isEditor && !Debug.isDebugBuild)) return;
+            GUI.Box(new Rect(16f, Screen.height - 190f, 310f, 174f),
+                $"FREE CAMERA  {baseSpeed:F1} m/s\n" +
+                "F2 Toggle   WASD Move   Q/E Down/Up\n" +
+                "RMB Look   MMB Pan   Wheel Speed\n" +
+                "Shift Fast   Ctrl Precision\n" +
+                "Home Truck   End Trailer\n" +
+                "G Set/Clear object focus\nAlt+RMB Orbit   Esc Clear focus");
+        }
+
+        private static InputAction ButtonWithBindings(string name, string first, string second)
+        {
+            var action = new InputAction(name, InputActionType.Button); action.AddBinding(first); action.AddBinding(second); return action;
+        }
+
+        private InputAction[] Actions() => new[] { _move, _vertical, _look, _scroll, _rightMouse, _middleMouse,
+            _fast, _precision, _home, _end, _focus, _clearFocus, _orbitModifier };
     }
 
     /// <summary>Development-only mirror viewport and aim visualization, toggled with F4.</summary>

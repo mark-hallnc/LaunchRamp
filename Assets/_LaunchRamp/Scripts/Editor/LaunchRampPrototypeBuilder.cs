@@ -519,13 +519,28 @@ namespace LaunchRamp.Editor
             exterior.farClipPlane = 180f;
             exteriorTransform.gameObject.AddComponent<AudioListener>();
 
+            Transform truck = root.transform.Find("Truck");
+            Transform developmentCameras = Group("DevelopmentCameras", root.transform);
+            Transform freeTransform = Group("FreeCamera", developmentCameras);
+            Vector3 freeLookPoint = truck.position + truck.up * 1f;
+            freeTransform.position = freeLookPoint - truck.forward * 13f + Vector3.up * 7f;
+            freeTransform.rotation = Quaternion.LookRotation(freeLookPoint - freeTransform.position, Vector3.up);
+            UnityEngine.Camera free = freeTransform.gameObject.AddComponent<UnityEngine.Camera>();
+            free.fieldOfView = diagnostic.fieldOfView;
+            free.nearClipPlane = diagnostic.nearClipPlane;
+            free.farClipPlane = diagnostic.farClipPlane;
+            freeTransform.gameObject.AddComponent<AudioListener>();
+            freeTransform.gameObject.AddComponent<UniversalAdditionalCameraData>();
+            PrototypeFreeCameraController freeController = freeTransform.gameObject.AddComponent<PrototypeFreeCameraController>();
+            freeController.Configure(free, truck, root.transform.Find("Trailer"));
+
             (UnityEngine.Camera leftMirror, UnityEngine.Camera rightMirror, Transform leftSurface, Transform rightSurface,
                 Vector3 leftAimTarget, Vector3 rightAimTarget) =
                 BuildMirrors(root.transform.Find("Truck"), driverMount);
             BuildMirrorDebug(root, leftMirror, rightMirror, leftSurface, rightSurface, driverMount,
                 leftAimTarget, rightAimTarget, leftMirror.targetTexture, rightMirror.targetTexture);
-            root.AddComponent<PrototypeCameraSwitcher>().Configure(driver, diagnostic, exterior, target,
-                root.transform.Find("Truck"));
+            root.AddComponent<PrototypeCameraSwitcher>().Configure(driver, diagnostic, exterior, free,
+                freeController, target, truck);
         }
 
         private static (UnityEngine.Camera left, UnityEngine.Camera right, Transform leftSurface, Transform rightSurface,
