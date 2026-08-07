@@ -30,7 +30,11 @@ namespace LaunchRamp.Editor
         private const string GroundName = "TestGround";
         private const string CourseName = "DiagnosticCourse";
         private const bool ConnectTrailer = true;
-        private const float TruckMass = 2200f, TrailerMass = 1700f;
+        private const float TruckMass = 2200f, TrailerFrameMass = 600f, BoatLoadMass = 1050f;
+        private const float TrailerMass = TrailerFrameMass + BoatLoadMass;
+        private const float BoatLength = 6.3f, BoatBeam = 2.2f, BoatHullHeight = 1.15f;
+        private const float BoatCenterZ = -.10f, BoatHullBottomY = .55f;
+        private const float TrailerYawLimit = 70f, BoatJackknifeSafetyMargin = 4f;
         private const float WheelRadius = .52f, WheelWidth = .34f, SuspensionDistance = .28f;
         private const float TruckSuspensionSpring = 38000f, TruckSuspensionDamper = 5200f;
         private const float TrailerSuspensionSpring = 40000f, TrailerSuspensionDamper = 6000f;
@@ -71,6 +75,7 @@ namespace LaunchRamp.Editor
         private static Material truckMaterial, trailerMaterial, wheelMaterial, groundMaterial;
         private static Material lineMaterial, targetMaterial, hazardMaterial, hitchMaterial, mirrorHousingMaterial;
         private static Material asphaltMaterial, concreteMaterial, waterMaterial, terrainMaterial, dockMaterial;
+        private static Material boatHullMaterial, boatAccentMaterial, boatWindshieldMaterial;
 
         [MenuItem("Launch Ramp/Build Vehicle Physics Prototype")]
         public static void Build() => BuildPrototype(ConnectTrailer);
@@ -223,6 +228,12 @@ namespace LaunchRamp.Editor
                 VehiclePhysicsValidator.Validate(vehicle, true);
                 Transform truck = vehicle.transform.Find("Truck");
                 Transform trailer = vehicle.transform.Find("Trailer");
+                if (trailer?.Find("BoatLoad/Hull") == null || trailer.Find("BoatLoad/Bow") == null ||
+                    trailer.Find("BoatLoad/BoatTopReference") == null || trailer.Find("BoatLoad/BoatSternReference") == null)
+                    issues.Add("Secured BoatLoad hierarchy or sight-line references are missing.");
+                Rigidbody trailerBody = trailer?.GetComponent<Rigidbody>();
+                if (trailerBody == null || Mathf.Abs(trailerBody.mass - TrailerMass) > .1f)
+                    issues.Add($"Trailer/load mass is not the configured {TrailerMass:F0} kg.");
                 Transform truckHitch = truck?.Find("HitchPoint"); Transform trailerHitch = trailer?.Find("HitchPoint");
                 if (truckHitch == null || trailerHitch == null || Vector3.Distance(truckHitch.position, trailerHitch.position) > .01f)
                     issues.Add("Truck/trailer hitch anchors are not coincident.");
@@ -450,17 +461,21 @@ namespace LaunchRamp.Editor
         private static void BuildBoatRampSightLineDebug(GameObject vehicleRoot, Transform driverEye,
             Transform trailer, Transform crestReference)
         {
-            Transform trailerTop = Group("TrailerTopSightLineReference", trailer);
-            trailerTop.localPosition = new Vector3(0f, TrailerSize.y * .5f, TrailerBodyCenterZ);
+            Transform boatTop = trailer.Find("BoatLoad/BoatTopReference");
+            Transform boatStern = trailer.Find("BoatLoad/BoatSternReference");
+            if (boatTop == null || boatStern == null)
+                throw new InvalidOperationException("Boat sight-line reference points were not created.");
             Transform markers = Group("BoatRampSightLineMarkers", vehicleRoot.transform);
             SetMaterial(Primitive("DriverEyeMarker", PrimitiveType.Sphere, markers, Vector3.zero,
                 new(.18f, .18f, .18f), true), targetMaterial);
-            SetMaterial(Primitive("TrailerTopMarker", PrimitiveType.Sphere, markers, Vector3.zero,
+            SetMaterial(Primitive("BoatTopMarker", PrimitiveType.Sphere, markers, Vector3.zero,
                 new(.18f, .18f, .18f), true), hitchMaterial);
+            SetMaterial(Primitive("BoatSternMarker", PrimitiveType.Sphere, markers, Vector3.zero,
+                new(.18f, .18f, .18f), true), boatAccentMaterial);
             SetMaterial(Primitive("CrestMarker", PrimitiveType.Cube, markers, Vector3.zero,
                 new(9.4f, .16f, .16f), true), hazardMaterial);
             markers.gameObject.SetActive(false);
-            vehicleRoot.AddComponent<BoatRampSightLineDebug>().Configure(driverEye, trailerTop,
+            vehicleRoot.AddComponent<BoatRampSightLineDebug>().Configure(driverEye, boatTop, boatStern,
                 crestReference, markers.gameObject);
         }
 
@@ -653,7 +668,7 @@ namespace LaunchRamp.Editor
             RectTransform panelRect = panel.GetComponent<RectTransform>();
             panelRect.anchorMin = panelRect.anchorMax = panelRect.pivot = new Vector2(0f, 1f);
             panelRect.anchoredPosition = new Vector2(18f, -18f);
-            panelRect.sizeDelta = new Vector2(390f, 285f);
+            panelRect.sizeDelta = new Vector2(420f, 350f);
             panel.GetComponent<Image>().color = new Color(0f, 0f, 0f, .68f);
 
             GameObject textObject = new("Telemetry", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
@@ -666,7 +681,8 @@ namespace LaunchRamp.Editor
 
             root.AddComponent<PrototypeHandlingDebugPanel>().Configure(panel, text,
                 truck.GetComponent<PrototypeTruckController>(), truck, trailer, truckHitch,
-                trailerHitch, trailer.GetComponent<PassiveTrailerAxle>());
+                trailerHitch, trailer.GetComponent<PassiveTrailerAxle>(), truck.transform.Find("DriverCameraMount"),
+                trailer.transform.Find("BoatLoad/BoatTopReference"));
         }
 
         private static void BuildMirrorDebug(GameObject root, UnityEngine.Camera left, UnityEngine.Camera right,
@@ -833,7 +849,10 @@ namespace LaunchRamp.Editor
             }
             else trailer.transform.localPosition = new Vector3(0f, 1.1f, -11f);
             Rigidbody body = trailer.AddComponent<Rigidbody>();
-            body.mass = TrailerMass; body.centerOfMass = new(0f, -.25f, -.20f);
+            body.mass = TrailerMass;
+            // Combined 600 kg frame + 1050 kg secured boat load. The COM is above the frame
+            // and slightly aft, but intentionally conservative for the first towing prototype.
+            body.centerOfMass = new Vector3(0f, .38f, -.35f);
             body.interpolation = RigidbodyInterpolation.Interpolate;
             body.collisionDetectionMode = CollisionDetectionMode.Continuous;
             BoxCollider trailerCollider = trailer.AddComponent<BoxCollider>();
@@ -853,6 +872,7 @@ namespace LaunchRamp.Editor
             float tongueLength = TrailerHitchZ - trailerFrontZ;
             SetMaterial(Primitive("TrailerTongue", PrimitiveType.Cube, trailer.transform,
                 new(0f, .05f, trailerFrontZ + tongueLength * .5f), new(.35f, .18f, tongueLength), true), hitchMaterial);
+            BuildBoatLoad(trailer.transform);
             if (connectTrailer)
             {
                 ConfigurableJoint joint = trailer.AddComponent<ConfigurableJoint>();
@@ -867,13 +887,123 @@ namespace LaunchRamp.Editor
                 joint.angularZMotion = ConfigurableJointMotion.Limited;
                 joint.lowAngularXLimit = new SoftJointLimit { limit = -20f };
                 joint.highAngularXLimit = new SoftJointLimit { limit = 20f };
-                joint.angularYLimit = new SoftJointLimit { limit = 80f };
+                joint.angularYLimit = new SoftJointLimit { limit = TrailerYawLimit };
                 joint.angularZLimit = new SoftJointLimit { limit = 8f };
                 joint.enableCollision = false;
             }
             trailer.AddComponent<PassiveTrailerAxle>().Configure(body, leftPoint, rightPoint,
                 leftVisual, rightVisual, ~0, WheelRadius, .30f, TrailerSuspensionSpring,
                 TrailerSuspensionDamper, TrailerLateralGrip, TrailerRollingResistance, WheelWidth);
+        }
+
+        private static void BuildBoatLoad(Transform trailer)
+        {
+            float estimatedContactAngle = EstimateBoatTruckContactAngle();
+            if (estimatedContactAngle - TrailerYawLimit < BoatJackknifeSafetyMargin)
+                throw new InvalidOperationException($"Boat/truck jackknife clearance is insufficient: estimated contact " +
+                    $"at {estimatedContactAngle:F0} degrees, limit {TrailerYawLimit:F0} degrees.");
+            // Secured load: visual children share the trailer Rigidbody and deliberately have no
+            // Rigidbody or Collider. Their mass is represented by the trailer Rigidbody above.
+            Transform boat = Group("BoatLoad", trailer);
+            boat.localPosition = new Vector3(0f, BoatHullBottomY, BoatCenterZ);
+
+            Transform hull = Group("Hull", boat);
+            MeshFilter hullFilter = hull.gameObject.AddComponent<MeshFilter>();
+            MeshRenderer hullRenderer = hull.gameObject.AddComponent<MeshRenderer>();
+            hullFilter.sharedMesh = EnsureBoatSectionMesh("PrototypeBoatHull",
+                new[] { -BoatLength * .5f, -1.0f, 1.65f },
+                new[] { BoatBeam * .46f, BoatBeam * .5f, BoatBeam * .39f },
+                new[] { .88f, 1.0f, 1.06f });
+            hullRenderer.sharedMaterial = boatHullMaterial;
+            SetMaterial(Primitive("LowerHullAccent", PrimitiveType.Cube, hull,
+                new(0f, .10f, -.45f), new(.30f, .16f, 5.25f), true), boatAccentMaterial);
+
+            Transform bow = Group("Bow", boat);
+            MeshFilter bowFilter = bow.gameObject.AddComponent<MeshFilter>();
+            MeshRenderer bowRenderer = bow.gameObject.AddComponent<MeshRenderer>();
+            bowFilter.sharedMesh = EnsureBoatSectionMesh("PrototypeBoatBow",
+                new[] { 1.65f, BoatLength * .5f }, new[] { BoatBeam * .39f, .06f },
+                new[] { 1.06f, 1.28f });
+            bowRenderer.sharedMaterial = boatHullMaterial;
+
+            SetMaterial(Primitive("Transom", PrimitiveType.Cube, boat,
+                new(0f, .50f, -BoatLength * .5f), new(BoatBeam * .92f, .88f, .10f), true), boatHullMaterial);
+            SetMaterial(Primitive("Console", PrimitiveType.Cube, boat,
+                new(.28f, 1.02f, .25f), new(.72f, .42f, .65f), true), boatHullMaterial);
+            GameObject windshield = Primitive("Windshield", PrimitiveType.Cube, boat,
+                new(.28f, 1.34f, .43f), new(.78f, .35f, .06f), true);
+            windshield.transform.localRotation = Quaternion.Euler(-14f, 0f, 0f);
+            SetMaterial(windshield, boatWindshieldMaterial);
+
+            Transform top = Group("BoatTopReference", boat); top.localPosition = new Vector3(.28f, 1.52f, .43f);
+            Transform stern = Group("BoatSternReference", boat); stern.localPosition = new Vector3(0f, .78f, -BoatLength * .5f);
+            SetMaterial(Primitive("WinchPost", PrimitiveType.Cube, trailer,
+                new(0f, .72f, 2.68f), new(.16f, 1.35f, .16f), true), hitchMaterial);
+        }
+
+        private static float EstimateBoatTruckContactAngle()
+        {
+            // Sample both tapered bow rails about the hitch against the pickup's rear visual envelope.
+            float bowStartZ = BoatCenterZ + 1.65f;
+            float bowEndZ = BoatCenterZ + BoatLength * .5f;
+            float bowStartHalfWidth = BoatBeam * .39f;
+            const float bowTipHalfWidth = .06f;
+            float truckRearZ = -TruckOverallLength * .5f;
+            for (int angle = 1; angle < 90; angle++)
+            {
+                Quaternion articulation = Quaternion.Euler(0f, angle, 0f);
+                for (int sample = 0; sample <= 100; sample++)
+                {
+                    float t = sample / 100f;
+                    float z = Mathf.Lerp(bowStartZ, bowEndZ, t);
+                    float halfWidth = Mathf.Lerp(bowStartHalfWidth, bowTipHalfWidth, t);
+                    foreach (float x in new[] { -halfWidth, halfWidth })
+                    {
+                        Vector3 relativeToHitch = new Vector3(x, 0f, z - TrailerHitchZ);
+                        Vector3 truckLocal = new Vector3(0f, 0f, TruckHitchZ) + articulation * relativeToHitch;
+                        if (Mathf.Abs(truckLocal.x) <= TruckHalfWidth && truckLocal.z >= truckRearZ)
+                            return angle;
+                    }
+                }
+            }
+            return 90f;
+        }
+
+        private static Mesh EnsureBoatSectionMesh(string name, float[] z, float[] halfWidths, float[] heights)
+        {
+            const string folder = "Assets/_LaunchRamp/Meshes";
+            Directory.CreateDirectory(folder);
+            string path = $"{folder}/{name}.asset";
+            Mesh mesh = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (mesh == null)
+            {
+                mesh = new Mesh { name = name };
+                AssetDatabase.CreateAsset(mesh, path);
+            }
+            var vertices = new Vector3[z.Length * 5];
+            for (int i = 0; i < z.Length; i++)
+            {
+                float half = halfWidths[i]; float height = heights[i]; int start = i * 5;
+                vertices[start] = new Vector3(-half, height, z[i]);
+                vertices[start + 1] = new Vector3(-half * .88f, height * .34f, z[i]);
+                vertices[start + 2] = new Vector3(0f, 0f, z[i]);
+                vertices[start + 3] = new Vector3(half * .88f, height * .34f, z[i]);
+                vertices[start + 4] = new Vector3(half, height, z[i]);
+            }
+            var triangles = new System.Collections.Generic.List<int>((z.Length - 1) * 30);
+            for (int section = 0; section < z.Length - 1; section++)
+            for (int edge = 0; edge < 5; edge++)
+            {
+                int nextEdge = (edge + 1) % 5;
+                int a = section * 5 + edge; int b = section * 5 + nextEdge;
+                int c = (section + 1) * 5 + edge; int d = (section + 1) * 5 + nextEdge;
+                triangles.Add(a); triangles.Add(b); triangles.Add(c);
+                triangles.Add(b); triangles.Add(d); triangles.Add(c);
+            }
+            mesh.Clear(); mesh.vertices = vertices; mesh.triangles = triangles.ToArray();
+            mesh.RecalculateNormals(); mesh.RecalculateBounds();
+            EditorUtility.SetDirty(mesh);
+            return mesh;
         }
 
         private static void ValidateBodyClearance(BoxCollider truckCollider, BoxCollider trailerCollider)
@@ -961,6 +1091,10 @@ namespace LaunchRamp.Editor
             terrainMaterial = EnsureColorMaterial("Prototype_Terrain_BrownGreen", new Color(.26f, .32f, .16f), .05f);
             dockMaterial = EnsureColorMaterial("Prototype_Dock_Brown", new Color(.34f, .20f, .10f), .18f);
             waterMaterial = EnsureTransparentMaterial("Prototype_Water_BlueGreen", new Color(.03f, .42f, .48f, .62f));
+            boatHullMaterial = EnsureColorMaterial("Prototype_Boat_OffWhite", new Color(.86f, .87f, .82f), .32f);
+            boatAccentMaterial = EnsureColorMaterial("Prototype_Boat_Accent_Navy", new Color(.025f, .08f, .18f), .28f);
+            boatWindshieldMaterial = EnsureTransparentMaterial("Prototype_Boat_Windshield",
+                new Color(.035f, .10f, .15f, .55f));
         }
 
         private static Material EnsureTransparentMaterial(string name, Color color)

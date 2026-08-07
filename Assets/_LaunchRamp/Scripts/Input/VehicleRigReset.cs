@@ -118,15 +118,17 @@ namespace LaunchRamp.Environment
     public sealed class BoatRampSightLineDebug : MonoBehaviour
     {
         [SerializeField] private Transform driverEye;
-        [SerializeField] private Transform trailerTopReference;
+        [SerializeField] private Transform boatTopReference;
+        [SerializeField] private Transform boatSternReference;
         [SerializeField] private Transform crestReference;
         [SerializeField] private GameObject markerRoot;
         private InputAction _toggle;
         private bool _visible;
 
-        public void Configure(Transform eye, Transform trailerTop, Transform crest, GameObject markers)
+        public void Configure(Transform eye, Transform boatTop, Transform boatStern, Transform crest, GameObject markers)
         {
-            driverEye = eye; trailerTopReference = trailerTop; crestReference = crest; markerRoot = markers;
+            driverEye = eye; boatTopReference = boatTop; boatSternReference = boatStern;
+            crestReference = crest; markerRoot = markers;
             if (markerRoot != null) markerRoot.SetActive(false);
         }
 
@@ -152,15 +154,18 @@ namespace LaunchRamp.Environment
 
         private void Update()
         {
-            if (!_visible || driverEye == null || trailerTopReference == null) return;
+            if (!_visible || driverEye == null || boatTopReference == null) return;
             Transform eyeMarker = markerRoot != null ? markerRoot.transform.Find("DriverEyeMarker") : null;
-            Transform trailerMarker = markerRoot != null ? markerRoot.transform.Find("TrailerTopMarker") : null;
+            Transform boatMarker = markerRoot != null ? markerRoot.transform.Find("BoatTopMarker") : null;
+            Transform sternMarker = markerRoot != null ? markerRoot.transform.Find("BoatSternMarker") : null;
             Transform crestMarker = markerRoot != null ? markerRoot.transform.Find("CrestMarker") : null;
             if (eyeMarker != null) eyeMarker.position = driverEye.position;
-            if (trailerMarker != null) trailerMarker.position = trailerTopReference.position;
+            if (boatMarker != null) boatMarker.position = boatTopReference.position;
+            if (sternMarker != null && boatSternReference != null) sternMarker.position = boatSternReference.position;
             if (crestMarker != null && crestReference != null) crestMarker.position = crestReference.position;
             Debug.DrawRay(driverEye.position, -driverEye.forward * 35f, Color.cyan);
-            Debug.DrawLine(driverEye.position, trailerTopReference.position, Color.yellow);
+            Debug.DrawLine(driverEye.position, boatTopReference.position, Color.yellow);
+            if (boatSternReference != null) Debug.DrawLine(driverEye.position, boatSternReference.position, Color.magenta);
             if (crestReference != null) Debug.DrawLine(driverEye.position, crestReference.position, Color.green);
         }
 

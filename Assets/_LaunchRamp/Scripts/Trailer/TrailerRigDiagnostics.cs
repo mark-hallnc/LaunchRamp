@@ -17,8 +17,8 @@ namespace LaunchRamp.Trailer
         [SerializeField] private bool logWhileThrottleHeld;
         [SerializeField, Min(.01f)] private float separationErrorDistance = .08f;
         [SerializeField, Min(1f)] private float excessiveTrailerAngularSpeed = 6f;
-        [SerializeField, Range(1f, 89f)] private float jackknifeWarningAngle = 70f;
-        [SerializeField, Range(1f, 89f)] private float jackknifeCriticalAngle = 78f;
+        [SerializeField, Range(1f, 89f)] private float jackknifeWarningAngle = 60f;
+        [SerializeField, Range(1f, 89f)] private float jackknifeCriticalAngle = 68f;
 
         private float _nextCheckTime;
         private bool _jackknifeWarningIssued;

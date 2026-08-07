@@ -16,16 +16,19 @@ namespace LaunchRamp.UI
         [SerializeField] private Rigidbody trailerBody;
         [SerializeField] private Transform truckHitch;
         [SerializeField] private Transform trailerHitch;
+        [SerializeField] private Transform driverEye;
+        [SerializeField] private Transform boatTop;
         [SerializeField] private PassiveTrailerAxle passiveAxle;
         private InputAction _toggle;
 
         public void Configure(GameObject root, TMP_Text targetText, PrototypeTruckController controller,
             Rigidbody truck, Rigidbody trailer, Transform truckAnchor,
-            Transform trailerAnchor, PassiveTrailerAxle axle)
+            Transform trailerAnchor, PassiveTrailerAxle axle, Transform configuredDriverEye, Transform configuredBoatTop)
         {
             panelRoot = root; text = targetText; truckController = controller;
             truckBody = truck; trailerBody = trailer; truckHitch = truckAnchor;
             trailerHitch = trailerAnchor; passiveAxle = axle;
+            driverEye = configuredDriverEye; boatTop = configuredBoatTop;
         }
 
         private void Awake()
@@ -62,6 +65,9 @@ namespace LaunchRamp.UI
                         $"Steer  {truckController.SteeringInput:F2}\n" +
                         $"Parking brake  {(truckController.ParkingBrakeApplied ? "On" : "Off")}\n" +
                         $"Trailer yaw  {yaw:F1} deg\nHitch separation  {separation:F3} m\n" +
+                        $"Trailer/load mass  {(trailerBody != null ? trailerBody.mass : 0f):F0} kg\n" +
+                        $"Load COM  {(trailerBody != null ? trailerBody.centerOfMass : Vector3.zero):F2}\n" +
+                        $"Boat top vs eye  {(boatTop != null && driverEye != null ? boatTop.position.y - driverEye.position.y : 0f):F2} m\n" +
                         $"Axle grounded  L:{passiveAxle != null && passiveAxle.LeftGrounded} " +
                         $"R:{passiveAxle != null && passiveAxle.RightGrounded}";
         }
