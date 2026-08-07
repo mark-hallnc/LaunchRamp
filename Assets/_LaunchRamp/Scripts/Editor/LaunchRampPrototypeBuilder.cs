@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.IO;
+using System.Linq;
 using LaunchRamp.Input;
 using LaunchRamp.Camera;
 using LaunchRamp.Environment;
@@ -46,6 +47,13 @@ namespace LaunchRamp.Editor
         private const float MirrorTargetHeightOffset = .65f;
         private const string PrototypeMaterialFolder = "Assets/_LaunchRamp/Materials/Prototype";
         private const string MirrorSurfaceLayerName = "MirrorSurface";
+        private static readonly bool UseImportedTruckVisual = true, UseImportedBoatVisual = true;
+        private const string ImportedPickupPrefabPath = "Assets/PickupTruck/Assets/Prefabs/Pickup.prefab";
+        private const string ImportedBoatPrefabPath = "Assets/HQ Boats/2.prefabs/boat_1.prefab";
+        private const string ImportedMaterialFolder = "Assets/_LaunchRamp/Materials/Imported";
+        private static readonly Vector3 ImportedTruckTargetSize = new(2.2f, 3.0f, 5.9f);
+        private static readonly Vector3 ImportedTruckBoundsCenter = new(0f, .53f, 0f);
+        private static readonly Quaternion ImportedTruckVisualRotation = Quaternion.Euler(0f, 180f, 0f);
         private const string LeftMirrorTexturePath = "Assets/_LaunchRamp/Materials/LeftMirrorRenderTexture.renderTexture";
         private const string RightMirrorTexturePath = "Assets/_LaunchRamp/Materials/RightMirrorRenderTexture.renderTexture";
         private const string LeftMirrorMaterialPath = "Assets/_LaunchRamp/Materials/LeftMirrorPrototype.mat";
@@ -809,6 +817,7 @@ namespace LaunchRamp.Editor
             truckCollider.size = TruckColliderSize;
             truckCollider.center = TruckColliderCenter;
             BuildPickupVisuals(truck.transform);
+            BuildImportedTruckVisual(truck.transform);
 
             Transform wheelGroup = Group("Wheels", truck.transform);
             Vector3[] positions = { new(-1.05f, -.45f, TruckFrontAxleZ), new(1.05f, -.45f, TruckFrontAxleZ),
@@ -834,12 +843,13 @@ namespace LaunchRamp.Editor
         {
             // Collider-free pickup silhouette. Open spaces between these pieces provide windshield,
             // side-window, and rear-window sightlines while one simple BoxCollider handles physics.
-            VisualBox("LowerChassis", truck, new(0f, -.12f, 0f), TruckSize);
-            VisualBox("FrontBumper", truck, new(0f, .05f, 2.80f), new(2.18f, .28f, .10f));
-            VisualBox("RearBumper", truck, new(0f, .05f, -2.80f), new(2.18f, .28f, .10f));
-            VisualBox("Hood", truck, new(0f, .42f, 1.85f), new(2.08f, .72f, 2f));
-            VisualBox("Bed", truck, new(0f, .30f, -1.48f), new(2.12f, .68f, 1.65f));
-            Transform cab = Group("CabFrame", truck);
+            Transform prototype = Group("PrototypeTruckVisual", truck);
+            VisualBox("LowerChassis", prototype, new(0f, -.12f, 0f), TruckSize);
+            VisualBox("FrontBumper", prototype, new(0f, .05f, 2.80f), new(2.18f, .28f, .10f));
+            VisualBox("RearBumper", prototype, new(0f, .05f, -2.80f), new(2.18f, .28f, .10f));
+            VisualBox("Hood", prototype, new(0f, .42f, 1.85f), new(2.08f, .72f, 2f));
+            VisualBox("Bed", prototype, new(0f, .30f, -1.48f), new(2.12f, .68f, 1.65f));
+            Transform cab = Group("CabFrame", prototype);
             VisualBox("Roof", cab, new(0f, 1.82f, .18f), new(2.04f, .18f, 1.72f));
             VisualBox("LeftLowerDoor", cab, new(-.98f, .48f, .18f), new(.16f, .72f, 1.72f));
             VisualBox("RightLowerDoor", cab, new(.98f, .48f, .18f), new(.16f, .72f, 1.72f));
@@ -851,6 +861,8 @@ namespace LaunchRamp.Editor
             }
             VisualBox("RearCabLowerWall", cab, new(0f, .73f, -.68f), new(1.82f, .28f, .14f));
             VisualBox("RearCabUpperRail", cab, new(0f, 1.72f, -.68f), new(1.82f, .16f, .14f));
+            prototype.gameObject.SetActive(!UseImportedTruckVisual ||
+                AssetDatabase.LoadAssetAtPath<GameObject>(ImportedPickupPrefabPath) == null);
         }
 
         private static void VisualBox(string name, Transform parent, Vector3 position, Vector3 scale) =>
@@ -1018,6 +1030,233 @@ namespace LaunchRamp.Editor
             SetMaterial(post, hitchMaterial);
             SetMaterial(Primitive("BowStop", PrimitiveType.Cube, trailer,
                 new(0f, 1.20f, 2.76f), new(.42f, .22f, .18f), true), wheelMaterial);
+            BuildImportedBoatVisual(boat);
+        }
+
+        private static void BuildImportedTruckVisual(Transform truck)
+        {
+            if (!UseImportedTruckVisual) return;
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(ImportedPickupPrefabPath);
+            if (prefab == null)
+            {
+                Debug.LogWarning($"[Launch Ramp] Imported pickup is unavailable at {ImportedPickupPrefabPath}; using gray-box visuals.");
+                return;
+            }
+
+            Transform visualRoot = Group("TruckVisual", truck);
+            GameObject imported = (GameObject)PrefabUtility.InstantiatePrefab(prefab, visualRoot);
+            imported.name = "ImportedPickup";
+            // The source OBJ's hood points toward its local -Z. Only this visual shell is flipped;
+            // the Truck Rigidbody, +Z drivetrain direction, cameras, mirrors, and hitch stay untouched.
+            imported.transform.localRotation = ImportedTruckVisualRotation;
+            PrepareImportedVisual(imported, true);
+            FitToBounds(imported.transform, ImportedTruckTargetSize, ImportedTruckBoundsCenter, false);
+        }
+
+        private static void BuildImportedBoatVisual(Transform boatLoad)
+        {
+            if (!UseImportedBoatVisual) return;
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(ImportedBoatPrefabPath);
+            if (prefab == null)
+            {
+                Debug.LogWarning($"[Launch Ramp] Imported boat is unavailable at {ImportedBoatPrefabPath}; using gray-box visuals.");
+                return;
+            }
+
+            Transform visualRoot = Group("BoatVisual", boatLoad);
+            GameObject imported = (GameObject)PrefabUtility.InstantiatePrefab(prefab, visualRoot);
+            imported.name = "ImportedBoat";
+            PrepareImportedVisual(imported, false);
+            OrientLongestHorizontalAxis(imported.transform);
+            OrientBoatBowForward(imported.transform);
+            FitToBounds(imported.transform, new Vector3(BoatBeam, 0f, 6.5f),
+                new Vector3(0f, .64f, 0f), true);
+
+            // Preserve the gray-box reference transforms while hiding only its rendered shell.
+            foreach (string name in new[] { "Hull", "Bow", "Transom", "Console", "Windshield" })
+            {
+                Transform part = boatLoad.Find(name);
+                if (part != null) SetRenderersEnabled(part, false);
+            }
+        }
+
+        private static void PrepareImportedVisual(GameObject root, bool hidePickupWheelDrawCalls)
+        {
+            foreach (Rigidbody body in root.GetComponentsInChildren<Rigidbody>(true))
+                UnityEngine.Object.DestroyImmediate(body);
+            foreach (Collider collider in root.GetComponentsInChildren<Collider>(true))
+                UnityEngine.Object.DestroyImmediate(collider);
+            foreach (UnityEngine.Camera camera in root.GetComponentsInChildren<UnityEngine.Camera>(true))
+                UnityEngine.Object.DestroyImmediate(camera);
+            foreach (Light light in root.GetComponentsInChildren<Light>(true))
+                UnityEngine.Object.DestroyImmediate(light);
+            foreach (AudioSource audioSource in root.GetComponentsInChildren<AudioSource>(true))
+                UnityEngine.Object.DestroyImmediate(audioSource);
+            foreach (MonoBehaviour behaviour in root.GetComponentsInChildren<MonoBehaviour>(true))
+                UnityEngine.Object.DestroyImmediate(behaviour);
+
+            foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+            {
+                bool wheelDrawCall = false;
+                bool decorativePickupMirror = false;
+                Material[] materials = renderer.sharedMaterials;
+                for (int i = 0; i < materials.Length; i++)
+                {
+                    Material source = materials[i];
+                    if (source == null) continue;
+                    string materialName = source.name.ToLowerInvariant();
+                    wheelDrawCall |= materialName.Contains("tire") || materialName.Contains("wheel") ||
+                                     materialName.Contains("brake");
+                    decorativePickupMirror |= materialName == "mirror";
+                    materials[i] = EnsureImportedMaterial(source);
+                }
+                renderer.sharedMaterials = materials;
+                // The pickup's 269 opaque draw-call objects do not form four reliable wheel assemblies.
+                // Hide their wheel fragments and retain the WheelCollider-synchronized LaunchRamp visuals.
+                if (hidePickupWheelDrawCalls && (wheelDrawCall || decorativePickupMirror)) renderer.enabled = false;
+            }
+        }
+
+        private static Material EnsureImportedMaterial(Material source)
+        {
+            Directory.CreateDirectory(ImportedMaterialFolder);
+            string safeName = string.Concat(source.name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+            string sourcePath = AssetDatabase.GetAssetPath(source);
+            string family = sourcePath.IndexOf("PickupTruck", StringComparison.OrdinalIgnoreCase) >= 0 ?
+                "Pickup" : "Boat";
+            string familyFolder = $"{ImportedMaterialFolder}/{family}";
+            Directory.CreateDirectory(familyFolder);
+            string path = $"{familyFolder}/{safeName}_URP.mat";
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            Shader shader = Shader.Find("Universal Render Pipeline/Lit");
+            if (material == null)
+            {
+                material = new Material(shader) { name = safeName + "_URP" };
+                AssetDatabase.CreateAsset(material, path);
+            }
+            else if (shader != null) material.shader = shader;
+
+            Color color = source.HasProperty("_Color") ? source.GetColor("_Color") : Color.white;
+            Texture texture = source.HasProperty("_MainTex") ? source.GetTexture("_MainTex") : null;
+            Texture normal = source.HasProperty("_BumpMap") ? source.GetTexture("_BumpMap") : null;
+            Texture metallic = source.HasProperty("_MetallicGlossMap") ? source.GetTexture("_MetallicGlossMap") : null;
+            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
+            if (material.HasProperty("_BaseMap")) material.SetTexture("_BaseMap", texture);
+            if (material.HasProperty("_BumpMap")) material.SetTexture("_BumpMap", normal);
+            if (material.HasProperty("_MetallicGlossMap")) material.SetTexture("_MetallicGlossMap", metallic);
+            if (normal != null) material.EnableKeyword("_NORMALMAP"); else material.DisableKeyword("_NORMALMAP");
+            string lowerName = source.name.ToLowerInvariant();
+            bool tire = lowerName.Contains("tire");
+            bool metal = lowerName.Contains("mirror") || lowerName.Contains("screw") ||
+                         lowerName.Contains("frontbar") || lowerName.Contains("chrome");
+            if (tire)
+            {
+                material.SetColor("_BaseColor", new Color(.025f, .028f, .032f, 1f));
+                material.SetFloat("_Metallic", 0f); material.SetFloat("_Smoothness", .16f);
+            }
+            else if (metal)
+            {
+                material.SetFloat("_Metallic", .75f); material.SetFloat("_Smoothness", .68f);
+            }
+            else material.SetFloat("_Smoothness", lowerName.Contains("body") ? .48f : .28f);
+            if (source.name.IndexOf("glass", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                color.a = color.a < .05f ? .28f : Mathf.Min(color.a, .38f);
+                material.SetColor("_BaseColor", color);
+                material.SetFloat("_Surface", 1f);
+                material.SetFloat("_Blend", 0f);
+                material.SetFloat("_ZWrite", 0f);
+                material.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                material.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                material.SetOverrideTag("RenderType", "Transparent");
+                material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                material.renderQueue = 3000;
+            }
+            else
+            {
+                material.SetFloat("_Surface", 0f); material.SetFloat("_ZWrite", 1f);
+                material.SetOverrideTag("RenderType", "Opaque");
+                material.DisableKeyword("_SURFACE_TYPE_TRANSPARENT"); material.renderQueue = -1;
+            }
+            EditorUtility.SetDirty(material);
+            return material;
+        }
+
+        private static void OrientLongestHorizontalAxis(Transform root)
+        {
+            Bounds bounds = CalculateBoundsInParent(root);
+            if (bounds.size.x > bounds.size.z)
+                root.localRotation = Quaternion.Euler(0f, 90f, 0f);
+        }
+
+        private static void OrientBoatBowForward(Transform root)
+        {
+            Transform engine = root.GetComponentsInChildren<Transform>(true)
+                .FirstOrDefault(value => value.name.Equals("engine", StringComparison.OrdinalIgnoreCase));
+            if (engine == null) return;
+            Bounds bounds = CalculateBoundsInParent(root);
+            float engineZ = root.parent.InverseTransformPoint(engine.position).z;
+            // The outboard belongs at the stern (-Z); flip only when the imported convention is opposite.
+            if (engineZ > bounds.center.z)
+                root.localRotation = Quaternion.Euler(0f, 180f, 0f) * root.localRotation;
+        }
+
+        private static void FitToBounds(Transform root, Vector3 targetSize, Vector3 targetCenter,
+            bool uniformScale)
+        {
+            Bounds bounds = CalculateBoundsInParent(root);
+            if (bounds.size.sqrMagnitude < .0001f)
+                throw new InvalidOperationException($"Imported visual {root.name} has no renderable bounds.");
+            if (uniformScale)
+            {
+                float scale = Mathf.Min(targetSize.x / bounds.size.x, targetSize.z / bounds.size.z);
+                root.localScale = Vector3.one * scale;
+            }
+            else root.localScale = new Vector3(targetSize.x / bounds.size.x,
+                targetSize.y / bounds.size.y, targetSize.z / bounds.size.z);
+
+            Bounds scaledBounds = CalculateBoundsInParent(root);
+            root.localPosition += targetCenter - scaledBounds.center;
+            Debug.Log($"[Launch Ramp] Fitted {root.name}: source bounds {bounds.size:F3}, " +
+                $"scale {root.localScale:F3}, final bounds {CalculateBoundsInParent(root).size:F3}.", root);
+        }
+
+        private static Bounds CalculateLocalRendererBounds(Transform root)
+        {
+            Matrix4x4 worldToLocal = root.worldToLocalMatrix;
+            return CalculateRendererBounds(root, point => worldToLocal.MultiplyPoint3x4(point));
+        }
+
+        private static Bounds CalculateBoundsInParent(Transform root)
+        {
+            Matrix4x4 worldToParent = root.parent.worldToLocalMatrix;
+            return CalculateRendererBounds(root, point => worldToParent.MultiplyPoint3x4(point));
+        }
+
+        private static Bounds CalculateRendererBounds(Transform root, Func<Vector3, Vector3> convert)
+        {
+            bool initialized = false;
+            Bounds result = default;
+            foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+            {
+                Bounds bounds = renderer.bounds;
+                Vector3 min = bounds.min, max = bounds.max;
+                for (int mask = 0; mask < 8; mask++)
+                {
+                    Vector3 corner = new((mask & 1) == 0 ? min.x : max.x,
+                        (mask & 2) == 0 ? min.y : max.y, (mask & 4) == 0 ? min.z : max.z);
+                    Vector3 point = convert(corner);
+                    if (!initialized) { result = new Bounds(point, Vector3.zero); initialized = true; }
+                    else result.Encapsulate(point);
+                }
+            }
+            return result;
+        }
+
+        private static void SetRenderersEnabled(Transform root, bool enabled)
+        {
+            foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
+                renderer.enabled = enabled;
         }
 
         private static float EstimateBoatTruckContactAngle()
