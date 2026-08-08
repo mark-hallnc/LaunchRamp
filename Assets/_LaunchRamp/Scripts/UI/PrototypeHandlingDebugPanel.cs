@@ -1,5 +1,6 @@
 using LaunchRamp.Trailer;
 using LaunchRamp.Vehicle;
+using LaunchRamp.Camera;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -19,16 +20,20 @@ namespace LaunchRamp.UI
         [SerializeField] private Transform driverEye;
         [SerializeField] private Transform boatTop;
         [SerializeField] private PassiveTrailerAxle passiveAxle;
+        [SerializeField] private PrototypeCameraSwitcher cameraSwitcher;
+        [SerializeField] private PrototypeFreeCameraController freeCameraController;
         private InputAction _toggle;
 
         public void Configure(GameObject root, TMP_Text targetText, PrototypeTruckController controller,
             Rigidbody truck, Rigidbody trailer, Transform truckAnchor,
-            Transform trailerAnchor, PassiveTrailerAxle axle, Transform configuredDriverEye, Transform configuredBoatTop)
+            Transform trailerAnchor, PassiveTrailerAxle axle, Transform configuredDriverEye, Transform configuredBoatTop,
+            PrototypeCameraSwitcher configuredCameraSwitcher, PrototypeFreeCameraController configuredFreeCamera)
         {
             panelRoot = root; text = targetText; truckController = controller;
             truckBody = truck; trailerBody = trailer; truckHitch = truckAnchor;
             trailerHitch = trailerAnchor; passiveAxle = axle;
             driverEye = configuredDriverEye; boatTop = configuredBoatTop;
+            cameraSwitcher = configuredCameraSwitcher; freeCameraController = configuredFreeCamera;
         }
 
         private void Awake()
@@ -71,7 +76,22 @@ namespace LaunchRamp.UI
                         $"Axles grounded  FL:{passiveAxle != null && passiveAxle.FrontLeftGrounded} " +
                         $"FR:{passiveAxle != null && passiveAxle.FrontRightGrounded} " +
                         $"RL:{passiveAxle != null && passiveAxle.RearLeftGrounded} " +
-                        $"RR:{passiveAxle != null && passiveAxle.RearRightGrounded}";
+                        $"RR:{passiveAxle != null && passiveAxle.RearRightGrounded}\n\n" +
+                        $"CAMERA INPUT (F3)\n" +
+                        $"ActiveCameraMode  {(cameraSwitcher != null ? cameraSwitcher.ActiveCameraMode : "Missing")}\n" +
+                        $"Free/Driver  {cameraSwitcher != null && cameraSwitcher.FreeCameraActive}/" +
+                        $"{cameraSwitcher != null && cameraSwitcher.DriverCameraActive}\n" +
+                        $"Exterior/Diagnostic  {cameraSwitcher != null && cameraSwitcher.ExteriorCameraActive}/" +
+                        $"{cameraSwitcher != null && cameraSwitcher.DiagnosticCameraActive}\n" +
+                        $"RMB look  {cameraSwitcher != null && cameraSwitcher.RightMouseLookHeld}\n" +
+                        $"Shoulder Q/E  {cameraSwitcher != null && cameraSwitcher.ShoulderLookLeftHeld}/" +
+                        $"{cameraSwitcher != null && cameraSwitcher.ShoulderLookRightHeld}\n" +
+                        $"Free move/look  {(freeCameraController != null ? freeCameraController.MoveVector : Vector2.zero)} / " +
+                        $"{(freeCameraController != null ? freeCameraController.LookDelta : Vector2.zero)}\n" +
+                        $"Free active/speed  {freeCameraController != null && freeCameraController.InspectionActive} / " +
+                        $"{(freeCameraController != null ? freeCameraController.MovementSpeed : 0f):F1} m/s\n" +
+                        $"Last camera action  {(cameraSwitcher != null ? cameraSwitcher.LastCameraAction : "None")}\n" +
+                        $"Application focused  {Application.isFocused}";
         }
 
         private void OnToggle(InputAction.CallbackContext context)

@@ -50,6 +50,18 @@ namespace LaunchRamp.Camera
         private bool _quickLookReturning;
         private float _quickLookReturnYaw;
         private float _quickLookYawVelocity;
+        private string _lastCameraAction = "None";
+
+        public string ActiveCameraMode => _usingFreeCamera ? "Free" : _usingExteriorCamera ? "Exterior" :
+            _usingDiagnosticCamera ? "Diagnostic" : "Driver";
+        public bool FreeCameraActive => _usingFreeCamera;
+        public bool DriverCameraActive => driverCamera != null && driverCamera.enabled;
+        public bool ExteriorCameraActive => exteriorCamera != null && exteriorCamera.enabled;
+        public bool DiagnosticCameraActive => diagnosticCamera != null && diagnosticCamera.enabled;
+        public bool RightMouseLookHeld => _orbitButton?.IsPressed() == true;
+        public bool ShoulderLookLeftHeld => !_usingFreeCamera && _quickLookLeft?.IsPressed() == true;
+        public bool ShoulderLookRightHeld => !_usingFreeCamera && _quickLookRight?.IsPressed() == true;
+        public string LastCameraAction => _lastCameraAction;
 
         public void Configure(UnityEngine.Camera driver, UnityEngine.Camera diagnostic,
             UnityEngine.Camera exterior, UnityEngine.Camera free, PrototypeFreeCameraController freeController,
@@ -128,6 +140,9 @@ namespace LaunchRamp.Camera
         private void Update()
         {
             if (_usingFreeCamera) return;
+            if (_quickLookLeft?.WasPressedThisFrame() == true) _lastCameraAction = "Driver shoulder left (Q)";
+            if (_quickLookRight?.WasPressedThisFrame() == true) _lastCameraAction = "Driver shoulder right (E)";
+            if (_orbitButton?.WasPressedThisFrame() == true) _lastCameraAction = "Right mouse look";
             Vector2 look = _look?.ReadValue<Vector2>() ?? Vector2.zero;
             if (_usingExteriorCamera)
             {
@@ -195,6 +210,7 @@ namespace LaunchRamp.Camera
         private void OnSwitchCamera(InputAction.CallbackContext context)
         {
             if (_usingFreeCamera) return;
+            _lastCameraAction = "C: driver/diagnostic";
             _usingExteriorCamera = false;
             _usingDiagnosticCamera = !_usingDiagnosticCamera;
             ApplyCameraState();
@@ -203,6 +219,7 @@ namespace LaunchRamp.Camera
         private void OnExteriorToggle(InputAction.CallbackContext context)
         {
             if (_usingFreeCamera) return;
+            _lastCameraAction = "V: exterior";
             if (!_usingExteriorCamera) _previousDiagnosticState = _usingDiagnosticCamera;
             _usingExteriorCamera = !_usingExteriorCamera;
             if (!_usingExteriorCamera) _usingDiagnosticCamera = _previousDiagnosticState;
@@ -212,6 +229,7 @@ namespace LaunchRamp.Camera
         private void OnFreeCameraToggle(InputAction.CallbackContext context)
         {
             if (!Application.isEditor && !Debug.isDebugBuild) return;
+            _lastCameraAction = _usingFreeCamera ? "F2: leave free camera" : "F2: enter free camera";
             if (!_usingFreeCamera)
             {
                 _storedDiagnosticState = _usingDiagnosticCamera;
@@ -313,6 +331,10 @@ namespace LaunchRamp.Camera
         private float _pitch;
 
         public float MovementSpeed => baseSpeed;
+        public bool InspectionActive => _inspectionActive;
+        public Vector2 MoveVector { get; private set; }
+        public Vector2 LookDelta { get; private set; }
+        public bool RightMouseHeld => _rightMouse?.IsPressed() == true;
 
         public void Configure(UnityEngine.Camera camera, Transform truck, Transform trailer)
         {
@@ -323,6 +345,7 @@ namespace LaunchRamp.Camera
         {
             _inspectionActive = active;
             if (active) CaptureAngles();
+            else { MoveVector = Vector2.zero; LookDelta = Vector2.zero; }
         }
 
         private void Awake()
@@ -360,6 +383,7 @@ namespace LaunchRamp.Camera
             if (_clearFocus.WasPressedThisFrame()) _hasFocus = false;
 
             Vector2 mouse = _look.ReadValue<Vector2>();
+            LookDelta = mouse;
             float scroll = _scroll.ReadValue<Vector2>().y;
             if (_hasFocus && Mathf.Abs(scroll) > .01f)
             {
@@ -391,6 +415,7 @@ namespace LaunchRamp.Camera
             }
 
             Vector2 move = _move.ReadValue<Vector2>();
+            MoveVector = move;
             float vertical = _vertical.ReadValue<float>();
             float multiplier = _fast.IsPressed() ? 3f : _precision.IsPressed() ? .25f : 1f;
             Vector3 velocity = transform.forward * move.y + transform.right * move.x + transform.up * vertical;

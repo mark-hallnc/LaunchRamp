@@ -56,9 +56,11 @@ namespace LaunchRamp.Editor
         private static readonly Quaternion ImportedTruckVisualRotation = Quaternion.Euler(0f, 180f, 0f);
         private const string LeftMirrorTexturePath = "Assets/_LaunchRamp/Materials/LeftMirrorRenderTexture.renderTexture";
         private const string RightMirrorTexturePath = "Assets/_LaunchRamp/Materials/RightMirrorRenderTexture.renderTexture";
+        private const string RearMirrorTexturePath = "Assets/_LaunchRamp/Materials/RearViewMirrorRenderTexture.renderTexture";
         private const string LeftMirrorMaterialPath = "Assets/_LaunchRamp/Materials/LeftMirrorPrototype.mat";
         private const string RightMirrorMaterialPath = "Assets/_LaunchRamp/Materials/RightMirrorPrototype.mat";
-        private static readonly Vector3 DriverEyePosition = new(-.50f, 1.62f, .50f);
+        private const string RearMirrorMaterialPath = "Assets/_LaunchRamp/Materials/RearViewMirrorPrototype.mat";
+        private static readonly Vector3 DriverEyePosition = new(-.50f, 1.62f, .18f);
         private static readonly Vector3 LeftMirrorPosition = new(-1.38f, 1.52f, 1.08f);
         private static readonly Vector3 RightMirrorPosition = new(1.38f, 1.52f, 1.08f);
         private static readonly Vector3 LeftMirrorOpticalPosition = new(-TruckHalfWidth - MirrorOutboardExtension, 1.54f, 1.12f);
@@ -66,7 +68,9 @@ namespace LaunchRamp.Editor
         private static readonly Vector3 LeftMirrorAimTrim = Vector3.zero;
         private static readonly Vector3 RightMirrorAimTrim = Vector3.zero;
         private const float LeftMirrorSurfaceYawOffset = 0f, RightMirrorSurfaceYawOffset = 0f;
-        private const float MirrorWidth = .64f, MirrorHeight = .30f, MirrorThickness = .06f;
+        private const float MirrorWidth = .62f, MirrorHeight = .28f, MirrorThickness = .055f;
+        private static readonly Vector3 RearViewMirrorPosition = new(0f, 1.78f, .92f);
+        private const float RearViewMirrorWidth = .56f, RearViewMirrorHeight = .16f;
         private const float MirrorFieldOfView = 42f;
         private const float MotorTorque = 2100f, BrakeTorque = 7000f, ParkingBrakeTorque = 9000f;
         private const float SteerAngle = 30f, SafeDirectionChangeSpeed = .5f;
@@ -565,8 +569,10 @@ namespace LaunchRamp.Editor
             int mirrorLayer = EnsureLayer(MirrorSurfaceLayerName);
             RenderTexture leftTexture = EnsureRenderTexture(LeftMirrorTexturePath);
             RenderTexture rightTexture = EnsureRenderTexture(RightMirrorTexturePath);
+            RenderTexture rearTexture = EnsureRenderTexture(RearMirrorTexturePath, 512, 128);
             Material leftMaterial = EnsureMirrorMaterial(LeftMirrorMaterialPath, leftTexture);
             Material rightMaterial = EnsureMirrorMaterial(RightMirrorMaterialPath, rightTexture);
+            Material rearMaterial = EnsureMirrorMaterial(RearMirrorMaterialPath, rearTexture);
             Transform trailer = truck.parent.Find("Trailer");
             if (trailer == null) throw new InvalidOperationException("Trailer was not available for mirror calibration.");
             float trailerRearZ = TrailerBodyCenterZ - TrailerOverallLength * .5f;
@@ -575,14 +581,25 @@ namespace LaunchRamp.Editor
             Vector3 rightAimTarget = trailer.TransformPoint(new Vector3(
                 TruckHalfWidth + MirrorTargetOutboardOffset, MirrorTargetHeightOffset, trailerRearZ));
 
-            UnityEngine.Camera left = CreateMirrorCamera("LeftMirrorCamera", truck, LeftMirrorOpticalPosition,
+            Transform leftAnchor = truck.Find("ImportedMirrorAnchors/LeftMirrorGlassAnchor");
+            Transform rightAnchor = truck.Find("ImportedMirrorAnchors/RightMirrorGlassAnchor");
+            Vector3 leftPosition = leftAnchor != null ? leftAnchor.localPosition : LeftMirrorPosition;
+            Vector3 rightPosition = rightAnchor != null ? rightAnchor.localPosition : RightMirrorPosition;
+            Transform leftSurface = CreateMirrorAssembly("LeftMirror", truck, leftPosition,
+                leftMaterial, mirrorLayer, driverEye, LeftMirrorSurfaceYawOffset, MirrorWidth, MirrorHeight);
+            Transform rightSurface = CreateMirrorAssembly("RightMirror", truck, rightPosition,
+                rightMaterial, mirrorLayer, driverEye, RightMirrorSurfaceYawOffset, MirrorWidth, MirrorHeight);
+            UnityEngine.Camera left = CreateMirrorCamera("MirrorCameraMount", leftSurface.parent, Vector3.zero,
                 leftAimTarget, LeftMirrorAimTrim, leftTexture, mirrorLayer);
-            UnityEngine.Camera right = CreateMirrorCamera("RightMirrorCamera", truck, RightMirrorOpticalPosition,
+            UnityEngine.Camera right = CreateMirrorCamera("MirrorCameraMount", rightSurface.parent, Vector3.zero,
                 rightAimTarget, RightMirrorAimTrim, rightTexture, mirrorLayer);
-            Transform leftSurface = CreateMirrorAssembly("LeftMirror", truck, LeftMirrorPosition,
-                leftMaterial, mirrorLayer, driverEye, LeftMirrorSurfaceYawOffset);
-            Transform rightSurface = CreateMirrorAssembly("RightMirror", truck, RightMirrorPosition,
-                rightMaterial, mirrorLayer, driverEye, RightMirrorSurfaceYawOffset);
+
+            Vector3 rearAimTarget = trailer.TransformPoint(new Vector3(0f, .82f, trailerRearZ));
+            Transform rearSurface = CreateMirrorAssembly("RearViewMirror", truck, RearViewMirrorPosition,
+                rearMaterial, mirrorLayer, driverEye, 0f, RearViewMirrorWidth, RearViewMirrorHeight);
+            UnityEngine.Camera rear = CreateMirrorCamera("RearViewMirrorCameraMount", rearSurface.parent,
+                new Vector3(0f, 0f, -.02f), rearAimTarget, Vector3.zero, rearTexture, mirrorLayer);
+            rear.fieldOfView = 42f;
             return (left, right, leftSurface, rightSurface, leftAimTarget, rightAimTarget);
         }
 
@@ -610,7 +627,8 @@ namespace LaunchRamp.Editor
         }
 
         private static Transform CreateMirrorAssembly(string name, Transform parent, Vector3 position,
-            Material displayMaterial, int mirrorLayer, Transform driverEye, float additionalYaw)
+            Material displayMaterial, int mirrorLayer, Transform driverEye, float additionalYaw,
+            float width, float height)
         {
             Transform assembly = Group(name + "Assembly", parent);
             assembly.localPosition = position;
@@ -618,9 +636,9 @@ namespace LaunchRamp.Editor
             // Rotating it 180 degrees exposes its back face and makes the black housing appear solid.
             assembly.localRotation = Quaternion.identity;
             GameObject housing = Primitive("MirrorHousing", PrimitiveType.Cube, assembly,
-                new(0f, 0f, .035f), new(MirrorWidth + .06f, MirrorHeight + .06f, MirrorThickness), true);
+                new(0f, 0f, .035f), new(width + .06f, height + .06f, MirrorThickness), true);
             GameObject display = Primitive("MirrorSurface", PrimitiveType.Quad, assembly,
-                new(0f, 0f, 0f), new(MirrorWidth, MirrorHeight, 1f), true);
+                new(0f, 0f, 0f), new(width, height, 1f), true);
             Vector3 directionToDriver = assembly.InverseTransformDirection(driverEye.position - display.transform.position);
             directionToDriver.y = 0f;
             if (directionToDriver.sqrMagnitude < .001f)
@@ -634,16 +652,16 @@ namespace LaunchRamp.Editor
             return display.transform;
         }
 
-        private static RenderTexture EnsureRenderTexture(string path)
+        private static RenderTexture EnsureRenderTexture(string path, int width = 512, int height = 256)
         {
             RenderTexture texture = AssetDatabase.LoadAssetAtPath<RenderTexture>(path);
             if (texture == null)
             {
-                texture = new RenderTexture(512, 256, 16) { name = Path.GetFileNameWithoutExtension(path) };
+                texture = new RenderTexture(width, height, 16) { name = Path.GetFileNameWithoutExtension(path) };
                 AssetDatabase.CreateAsset(texture, path);
             }
-            texture.width = 512;
-            texture.height = 256;
+            texture.width = width;
+            texture.height = height;
             texture.depth = 16;
             texture.filterMode = FilterMode.Bilinear;
             texture.useMipMap = false;
@@ -696,7 +714,7 @@ namespace LaunchRamp.Editor
             RectTransform panelRect = panel.GetComponent<RectTransform>();
             panelRect.anchorMin = panelRect.anchorMax = panelRect.pivot = new Vector2(0f, 1f);
             panelRect.anchoredPosition = new Vector2(18f, -18f);
-            panelRect.sizeDelta = new Vector2(420f, 350f);
+            panelRect.sizeDelta = new Vector2(520f, 610f);
             panel.GetComponent<Image>().color = new Color(0f, 0f, 0f, .68f);
 
             GameObject textObject = new("Telemetry", typeof(RectTransform), typeof(CanvasRenderer), typeof(TextMeshProUGUI));
@@ -710,7 +728,8 @@ namespace LaunchRamp.Editor
             root.AddComponent<PrototypeHandlingDebugPanel>().Configure(panel, text,
                 truck.GetComponent<PrototypeTruckController>(), truck, trailer, truckHitch,
                 trailerHitch, trailer.GetComponent<PassiveTrailerAxle>(), truck.transform.Find("DriverCameraMount"),
-                trailer.transform.Find("BoatLoad/BoatTopReference"));
+                trailer.transform.Find("BoatLoad/BoatTopReference"), root.GetComponent<PrototypeCameraSwitcher>(),
+                root.GetComponentInChildren<PrototypeFreeCameraController>(true));
         }
 
         private static void BuildMirrorDebug(GameObject root, UnityEngine.Camera left, UnityEngine.Camera right,
@@ -1051,6 +1070,77 @@ namespace LaunchRamp.Editor
             imported.transform.localRotation = ImportedTruckVisualRotation;
             PrepareImportedVisual(imported, true);
             FitToBounds(imported.transform, ImportedTruckTargetSize, ImportedTruckBoundsCenter, false);
+            AlignImportedWheelOpenings(imported.transform, truck);
+            BuildImportedMirrorAnchors(imported.transform, truck);
+        }
+
+        private static void AlignImportedWheelOpenings(Transform imported, Transform truck)
+        {
+            var frontCenters = new System.Collections.Generic.List<float>();
+            var rearCenters = new System.Collections.Generic.List<float>();
+            foreach (Renderer renderer in imported.GetComponentsInChildren<Renderer>(true))
+            {
+                if (!RendererUsesNamedMaterial(renderer, "tire", "wheel", "brake")) continue;
+                float z = truck.InverseTransformPoint(renderer.bounds.center).z;
+                if (z >= 0f) frontCenters.Add(z); else rearCenters.Add(z);
+            }
+            if (frontCenters.Count == 0 || rearCenters.Count == 0)
+            {
+                Debug.LogWarning("[Launch Ramp] Could not derive imported pickup axle centers; body alignment was left unchanged.", imported);
+                return;
+            }
+            float front = frontCenters.Average();
+            float rear = rearCenters.Average();
+            // Front arch placement is the visible defect. Make it exact, then report the source
+            // asset's remaining rear-arch error rather than moving any physics wheel.
+            float correction = TruckFrontAxleZ - front;
+            imported.localPosition += Vector3.forward * correction;
+            float residualFront = TruckFrontAxleZ - (front + correction);
+            float residualRear = TruckRearAxleZ - (rear + correction);
+            Debug.Log($"[Launch Ramp] Imported pickup visual axles measured at Z {front:F3}/{rear:F3}; " +
+                $"shell correction {correction:F3} m; residual front/rear {residualFront:F3}/{residualRear:F3} m.", imported);
+        }
+
+        private static void BuildImportedMirrorAnchors(Transform imported, Transform truck)
+        {
+            bool leftFound = TryGetRendererSideCenter(imported, truck, true, "mirror", out Vector3 left);
+            bool rightFound = TryGetRendererSideCenter(imported, truck, false, "mirror", out Vector3 right);
+            Transform anchors = Group("ImportedMirrorAnchors", truck);
+            Transform leftAnchor = Group("LeftMirrorGlassAnchor", anchors);
+            Transform rightAnchor = Group("RightMirrorGlassAnchor", anchors);
+            leftAnchor.localPosition = leftFound ? left : LeftMirrorPosition;
+            rightAnchor.localPosition = rightFound ? right : RightMirrorPosition;
+            Debug.Log($"[Launch Ramp] Pickup mirror anchors: left={leftAnchor.localPosition:F3}, " +
+                $"right={rightAnchor.localPosition:F3} (source geometry found={leftFound}/{rightFound}).", imported);
+        }
+
+        private static bool TryGetRendererSideCenter(Transform imported, Transform truck, bool left,
+            string materialToken, out Vector3 center)
+        {
+            bool initialized = false;
+            Bounds combined = default;
+            foreach (Renderer renderer in imported.GetComponentsInChildren<Renderer>(true))
+            {
+                if (!RendererUsesNamedMaterial(renderer, materialToken)) continue;
+                Vector3 localCenter = truck.InverseTransformPoint(renderer.bounds.center);
+                if ((left && localCenter.x >= 0f) || (!left && localCenter.x <= 0f)) continue;
+                if (!initialized) { combined = renderer.bounds; initialized = true; }
+                else combined.Encapsulate(renderer.bounds);
+            }
+            center = initialized ? truck.InverseTransformPoint(combined.center) : Vector3.zero;
+            return initialized;
+        }
+
+        private static bool RendererUsesNamedMaterial(Renderer renderer, params string[] tokens)
+        {
+            foreach (Material material in renderer.sharedMaterials)
+            {
+                if (material == null) continue;
+                string name = material.name.ToLowerInvariant();
+                foreach (string token in tokens)
+                    if (name.Contains(token)) return true;
+            }
+            return false;
         }
 
         private static void BuildImportedBoatVisual(Transform boatLoad)
@@ -1103,12 +1193,18 @@ namespace LaunchRamp.Editor
                 for (int i = 0; i < materials.Length; i++)
                 {
                     Material source = materials[i];
-                    if (source == null) continue;
+                    if (source == null)
+                    {
+                        materials[i] = hidePickupWheelDrawCalls ? truckMaterial : boatHullMaterial;
+                        continue;
+                    }
                     string materialName = source.name.ToLowerInvariant();
                     wheelDrawCall |= materialName.Contains("tire") || materialName.Contains("wheel") ||
                                      materialName.Contains("brake");
                     decorativePickupMirror |= materialName == "mirror";
-                    materials[i] = EnsureImportedMaterial(source);
+                    Material converted = EnsureImportedMaterial(source);
+                    materials[i] = converted.shader != null && converted.shader.isSupported ? converted :
+                        hidePickupWheelDrawCalls ? truckMaterial : boatHullMaterial;
                 }
                 renderer.sharedMaterials = materials;
                 // The pickup's 269 opaque draw-call objects do not form four reliable wheel assemblies.
@@ -1239,6 +1335,9 @@ namespace LaunchRamp.Editor
             Bounds result = default;
             foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
             {
+                // Pickup mirror geometry extends beyond the cab and previously polluted the width
+                // fit, leaving the actual body noticeably skinny. Fit the body to 2.2 m instead.
+                if (root.name == "ImportedPickup" && RendererUsesNamedMaterial(renderer, "mirror")) continue;
                 Bounds bounds = renderer.bounds;
                 Vector3 min = bounds.min, max = bounds.max;
                 for (int mask = 0; mask < 8; mask++)
