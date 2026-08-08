@@ -68,9 +68,9 @@ namespace LaunchRamp.Editor
         private static readonly Vector3 LeftMirrorAimTrim = Vector3.zero;
         private static readonly Vector3 RightMirrorAimTrim = Vector3.zero;
         private const float LeftMirrorSurfaceYawOffset = 0f, RightMirrorSurfaceYawOffset = 0f;
-        private const float MirrorWidth = .62f, MirrorHeight = .28f, MirrorThickness = .055f;
-        private static readonly Vector3 RearViewMirrorPosition = new(0f, 1.78f, .92f);
-        private const float RearViewMirrorWidth = .56f, RearViewMirrorHeight = .16f;
+        private const float MirrorWidth = .38f, MirrorHeight = .24f, MirrorThickness = .055f;
+        private static readonly Vector3 RearViewMirrorPosition = new(0f, 1.79f, .86f);
+        private const float RearViewMirrorWidth = .26f, RearViewMirrorHeight = .085f;
         private const float MirrorFieldOfView = 42f;
         private const float MotorTorque = 2100f, BrakeTorque = 7000f, ParkingBrakeTorque = 9000f;
         private const float SteerAngle = 30f, SafeDirectionChangeSpeed = .5f;
@@ -585,21 +585,21 @@ namespace LaunchRamp.Editor
             Transform rightAnchor = truck.Find("ImportedMirrorAnchors/RightMirrorGlassAnchor");
             Vector3 leftPosition = leftAnchor != null ? leftAnchor.localPosition : LeftMirrorPosition;
             Vector3 rightPosition = rightAnchor != null ? rightAnchor.localPosition : RightMirrorPosition;
-            Transform leftSurface = CreateMirrorAssembly("LeftMirror", truck, leftPosition,
-                leftMaterial, mirrorLayer, driverEye, LeftMirrorSurfaceYawOffset, MirrorWidth, MirrorHeight);
-            Transform rightSurface = CreateMirrorAssembly("RightMirror", truck, rightPosition,
-                rightMaterial, mirrorLayer, driverEye, RightMirrorSurfaceYawOffset, MirrorWidth, MirrorHeight);
+            Transform leftSurface = CreateSideMirrorAssembly("LeftMirror", truck, leftPosition,
+                leftMaterial, mirrorLayer, driverEye, LeftMirrorSurfaceYawOffset, true);
+            Transform rightSurface = CreateSideMirrorAssembly("RightMirror", truck, rightPosition,
+                rightMaterial, mirrorLayer, driverEye, RightMirrorSurfaceYawOffset, false);
             UnityEngine.Camera left = CreateMirrorCamera("MirrorCameraMount", leftSurface.parent, Vector3.zero,
                 leftAimTarget, LeftMirrorAimTrim, leftTexture, mirrorLayer);
             UnityEngine.Camera right = CreateMirrorCamera("MirrorCameraMount", rightSurface.parent, Vector3.zero,
                 rightAimTarget, RightMirrorAimTrim, rightTexture, mirrorLayer);
 
             Vector3 rearAimTarget = trailer.TransformPoint(new Vector3(0f, .82f, trailerRearZ));
-            Transform rearSurface = CreateMirrorAssembly("RearViewMirror", truck, RearViewMirrorPosition,
-                rearMaterial, mirrorLayer, driverEye, 0f, RearViewMirrorWidth, RearViewMirrorHeight);
+            Transform rearSurface = CreateRearViewMirrorAssembly(truck, RearViewMirrorPosition,
+                rearMaterial, mirrorLayer, driverEye);
             UnityEngine.Camera rear = CreateMirrorCamera("RearViewMirrorCameraMount", rearSurface.parent,
                 new Vector3(0f, 0f, -.02f), rearAimTarget, Vector3.zero, rearTexture, mirrorLayer);
-            rear.fieldOfView = 42f;
+            rear.fieldOfView = 40f;
             return (left, right, leftSurface, rightSurface, leftAimTarget, rightAimTarget);
         }
 
@@ -626,30 +626,68 @@ namespace LaunchRamp.Editor
             return camera;
         }
 
-        private static Transform CreateMirrorAssembly(string name, Transform parent, Vector3 position,
-            Material displayMaterial, int mirrorLayer, Transform driverEye, float additionalYaw,
-            float width, float height)
+        private static Transform CreateSideMirrorAssembly(string name, Transform truck, Vector3 position,
+            Material displayMaterial, int mirrorLayer, Transform driverEye, float additionalYaw, bool left)
         {
-            Transform assembly = Group(name + "Assembly", parent);
+            Transform assembly = Group(name + "Assembly", truck);
             assembly.localPosition = position;
-            // Unity's Quad visible normal faces the driver (-local Z) in this placement.
-            // Rotating it 180 degrees exposes its back face and makes the black housing appear solid.
-            assembly.localRotation = Quaternion.identity;
+            AimMirrorAssemblyAtDriver(assembly, driverEye, additionalYaw, name);
+            float side = left ? -1f : 1f;
+            Vector3 doorAttachment = new(side * 1.02f, position.y - .10f, position.z - .16f);
+            GameObject arm = CreateLocalBeam("MirrorArm", assembly,
+                assembly.InverseTransformPoint(truck.TransformPoint(doorAttachment)), Vector3.zero, .045f);
             GameObject housing = Primitive("MirrorHousing", PrimitiveType.Cube, assembly,
-                new(0f, 0f, .035f), new(width + .06f, height + .06f, MirrorThickness), true);
+                new(0f, 0f, .027f), new(MirrorWidth + .045f, MirrorHeight + .045f, MirrorThickness), true);
             GameObject display = Primitive("MirrorSurface", PrimitiveType.Quad, assembly,
-                new(0f, 0f, 0f), new(width, height, 1f), true);
-            Vector3 directionToDriver = assembly.InverseTransformDirection(driverEye.position - display.transform.position);
+                new(0f, 0f, -.002f), new(MirrorWidth, MirrorHeight, 1f), true);
+            SetMaterial(housing, mirrorHousingMaterial);
+            SetMaterial(arm, mirrorHousingMaterial);
+            SetMaterial(display, displayMaterial);
+            arm.layer = housing.layer = display.layer = mirrorLayer;
+            return display.transform;
+        }
+
+        private static Transform CreateRearViewMirrorAssembly(Transform truck, Vector3 position,
+            Material displayMaterial, int mirrorLayer, Transform driverEye)
+        {
+            Transform assembly = Group("RearViewMirrorAssembly", truck);
+            assembly.localPosition = position;
+            AimMirrorAssemblyAtDriver(assembly, driverEye, 0f, "RearViewMirror");
+            Vector3 windshieldMount = new(0f, 1.94f, .90f);
+            GameObject mount = CreateLocalBeam("RearViewMount", assembly,
+                assembly.InverseTransformPoint(truck.TransformPoint(windshieldMount)), Vector3.zero, .025f);
+            GameObject housing = Primitive("RearViewHousing", PrimitiveType.Cube, assembly,
+                new(0f, 0f, .018f), new(RearViewMirrorWidth + .035f, RearViewMirrorHeight + .025f, .036f), true);
+            GameObject display = Primitive("RearViewMirrorSurface", PrimitiveType.Quad, assembly,
+                new(0f, 0f, -.002f), new(RearViewMirrorWidth, RearViewMirrorHeight, 1f), true);
+            SetMaterial(mount, mirrorHousingMaterial);
+            SetMaterial(housing, mirrorHousingMaterial);
+            SetMaterial(display, displayMaterial);
+            mount.layer = housing.layer = display.layer = mirrorLayer;
+            return display.transform;
+        }
+
+        private static void AimMirrorAssemblyAtDriver(Transform assembly, Transform driverEye,
+            float additionalYaw, string name)
+        {
+            Vector3 directionToDriver = driverEye.position - assembly.position;
             directionToDriver.y = 0f;
             if (directionToDriver.sqrMagnitude < .001f)
                 throw new InvalidOperationException($"{name} cannot aim at a coincident DriverCameraMount.");
-            // A Unity Quad's visible normal is -forward, so forward points away from the driver.
-            display.transform.localRotation = Quaternion.LookRotation(-directionToDriver.normalized, Vector3.up) *
+            // Unity Quad glass faces -forward, so the assembly forward points away from the eye.
+            assembly.rotation = Quaternion.LookRotation(-directionToDriver.normalized, assembly.parent.up) *
                 Quaternion.Euler(0f, additionalYaw, 0f);
-            SetMaterial(housing, mirrorHousingMaterial);
-            SetMaterial(display, displayMaterial);
-            housing.layer = display.layer = mirrorLayer;
-            return display.transform;
+        }
+
+        private static GameObject CreateLocalBeam(string name, Transform parent, Vector3 start,
+            Vector3 end, float width)
+        {
+            Vector3 direction = end - start;
+            GameObject beam = Primitive(name, PrimitiveType.Cube, parent, (start + end) * .5f,
+                new(width, width, Mathf.Max(direction.magnitude, .01f)), true);
+            beam.transform.localRotation = direction.sqrMagnitude > .0001f ?
+                Quaternion.LookRotation(direction.normalized, Vector3.up) : Quaternion.identity;
+            return beam;
         }
 
         private static RenderTexture EnsureRenderTexture(string path, int width = 512, int height = 256)
